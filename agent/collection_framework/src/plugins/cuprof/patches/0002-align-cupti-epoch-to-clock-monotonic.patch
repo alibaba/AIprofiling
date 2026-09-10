@@ -1,7 +1,7 @@
 From b5a4a7a9f1b60381be9647265a4690fa96955d11 Mon Sep 17 00:00:00 2001
 From: AlanFokCo <alanfok2868@gmail.com>
 Date: Tue, 8 Sep 2026 15:51:02 +0800
-Subject: [PATCH 2/3] aiprof: emit kernel timestamps in CLOCK_MONOTONIC to fuse
+Subject: [PATCH 2/4] aiprof: emit kernel timestamps in CLOCK_MONOTONIC to fuse
  with pyki
 
 CUPTI reports activity timestamps as CLOCK_REALTIME (epoch) nanoseconds,

@@ -1,5 +1,6 @@
 // AIProf-local modification (Apache-2.0 4(b)): this file differs from
-// upstream cuprof. See VENDOR.md and patches/0002-align-cupti-epoch-to-clock-monotonic.patch.
+// upstream cuprof. See VENDOR.md and patches/0002-align-cupti-epoch-to-clock-monotonic.patch
+// and patches/0004-duration-from-raw-endpoint-pair.patch.
 #include "trace_writer.h"
 
 #include <unistd.h>
@@ -67,15 +68,22 @@ bool WriteChromeTrace(const std::string& path, const std::vector<Event>& events,
         const Event& e = events[i];
         if (!first) f << ",\n";
         first = false;
+        // Shift the start timestamp only. A value at or below the offset is
+        // left unchanged rather than subtracted, so it can never wrap uint64.
         uint64_t adj_start = e.start_ns > epoch_to_mono_offset_ns
                                  ? e.start_ns - epoch_to_mono_offset_ns
                                  : e.start_ns;
-        uint64_t adj_end = e.end_ns > epoch_to_mono_offset_ns
-                               ? e.end_ns - epoch_to_mono_offset_ns
-                               : e.end_ns;
+        // A duration is invariant under a uniform shift, so take it from the
+        // raw pair. Shifting each endpoint separately and subtracting is not:
+        // an event that straddles the offset, or one whose end_ns is still
+        // unset (0), gets one endpoint shifted and the other left alone, and
+        // the subtraction then underflows uint64 to ~1.8e19 ns - a single such
+        // record corrupts the whole trace while WriteChromeTrace() still
+        // reports success.
+        uint64_t dur_ns = e.end_ns >= e.start_ns ? e.end_ns - e.start_ns : 0;
         f << "{\"ph\":\"X\",\"name\":\"" << Escape(e.name) << "\",\"cat\":\"" << e.category
           << "\",\"ts\":" << ToMicros(adj_start)
-          << ",\"dur\":" << ToMicros(adj_end - adj_start) << ",\"pid\":" << pid
+          << ",\"dur\":" << ToMicros(dur_ns) << ",\"pid\":" << pid
           << ",\"tid\":" << e.stream_id << ",\"args\":{\"device\":" << e.device_id
           << ",\"correlation\":" << e.correlation_id;
         for (size_t a = 0; a < e.args.size(); ++a) {

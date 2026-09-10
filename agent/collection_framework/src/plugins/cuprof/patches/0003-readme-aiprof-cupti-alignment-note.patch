@@ -1,7 +1,7 @@
 From 01cd51000b639cdc3ec91bbdd785bce9be0fa680 Mon Sep 17 00:00:00 2001
 From: AlanFokCo <alanfok2868@gmail.com>
 Date: Thu, 10 Sep 2026 14:45:00 +0800
-Subject: [PATCH 3/3] aiprof: point the README at the vendored CUPTI alignment
+Subject: [PATCH 3/4] aiprof: point the README at the vendored CUPTI alignment
  contract
 
 Upstream cuprof links against the system CUPTI and deliberately vendors no

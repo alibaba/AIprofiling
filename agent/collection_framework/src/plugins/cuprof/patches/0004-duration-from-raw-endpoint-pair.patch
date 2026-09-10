@@ -1,0 +1,69 @@
+From ac1297087f9faf02548c476de97592409d23f367 Mon Sep 17 00:00:00 2001
+From: AlanFokCo <alanfok2868@gmail.com>
+Date: Thu, 10 Sep 2026 14:50:00 +0800
+Subject: [PATCH 4/4] aiprof: take the kernel duration from the raw CUPTI
+ endpoint pair
+
+Patch 0002 shifts each event endpoint from CLOCK_REALTIME to
+CLOCK_MONOTONIC separately and derives the duration by subtracting the two
+adjusted values. That is only sound while both endpoints land on the same
+side of the offset. An event that straddles it - or, far more likely, one
+whose end_ns is still unset (0) because CUPTI emitted a record without a
+matching end - gets one endpoint shifted and the other left alone, so
+adj_end - adj_start underflows uint64 to roughly 1.8e19 ns.
+
+The emitted "dur" then becomes ~1.8e16 us, which pushes the trace's time
+bounds out by six orders of magnitude and flattens every real kernel into a
+single pixel in Perfetto, yet WriteChromeTrace() still returns true and
+CollectionFramework still reports a successful collection.
+
+A duration is invariant under a uniform shift, so compute it from the raw
+pair instead, clamping a reversed or unset pair to zero. The timestamp keeps
+patch 0002's existing semantics exactly: shift when above the offset, leave
+unchanged otherwise, never wrap.
+---
+ src/trace_writer.cc | 18 +++++++++++++-----
+ 1 file changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/src/trace_writer.cc b/src/trace_writer.cc
+index d72f564..cdaac12 100644
+--- a/src/trace_writer.cc
++++ b/src/trace_writer.cc
+@@ -1,5 +1,6 @@
+ // AIProf-local modification (Apache-2.0 4(b)): this file differs from
+-// upstream cuprof. See VENDOR.md and patches/0002-align-cupti-epoch-to-clock-monotonic.patch.
++// upstream cuprof. See VENDOR.md and patches/0002-align-cupti-epoch-to-clock-monotonic.patch
++// and patches/0004-duration-from-raw-endpoint-pair.patch.
+ #include "trace_writer.h"
+ 
+ #include <unistd.h>
+@@ -67,15 +68,22 @@ bool WriteChromeTrace(const std::string& path, const std::vector<Event>& events,
+         const Event& e = events[i];
+         if (!first) f << ",\n";
+         first = false;
++        // Shift the start timestamp only. A value at or below the offset is
++        // left unchanged rather than subtracted, so it can never wrap uint64.
+         uint64_t adj_start = e.start_ns > epoch_to_mono_offset_ns
+                                  ? e.start_ns - epoch_to_mono_offset_ns
+                                  : e.start_ns;
+-        uint64_t adj_end = e.end_ns > epoch_to_mono_offset_ns
+-                               ? e.end_ns - epoch_to_mono_offset_ns
+-                               : e.end_ns;
++        // A duration is invariant under a uniform shift, so take it from the
++        // raw pair. Shifting each endpoint separately and subtracting is not:
++        // an event that straddles the offset, or one whose end_ns is still
++        // unset (0), gets one endpoint shifted and the other left alone, and
++        // the subtraction then underflows uint64 to ~1.8e19 ns - a single such
++        // record corrupts the whole trace while WriteChromeTrace() still
++        // reports success.
++        uint64_t dur_ns = e.end_ns >= e.start_ns ? e.end_ns - e.start_ns : 0;
+         f << "{\"ph\":\"X\",\"name\":\"" << Escape(e.name) << "\",\"cat\":\"" << e.category
+           << "\",\"ts\":" << ToMicros(adj_start)
+-          << ",\"dur\":" << ToMicros(adj_end - adj_start) << ",\"pid\":" << pid
++          << ",\"dur\":" << ToMicros(dur_ns) << ",\"pid\":" << pid
+           << ",\"tid\":" << e.stream_id << ",\"args\":{\"device\":" << e.device_id
+           << ",\"correlation\":" << e.correlation_id;
+         for (size_t a = 0; a < e.args.size(); ++a) {
+-- 
+2.55.0
+

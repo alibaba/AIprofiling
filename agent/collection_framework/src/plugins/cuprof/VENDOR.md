@@ -13,7 +13,7 @@ add a patch under `patches/` and record it below.
 | License | Apache-2.0. `LICENSE` and `NOTICE` here are upstream's, unmodified. |
 
 Everything in this tree is byte-identical to `cuprof@84cb9d8` **except** the seven
-files touched by the three patches below. Each of those files carries an
+files touched by the four patches below. Each of those files carries an
 Apache-2.0 §4(b) "modified" notice in its first lines — a code comment in the
 six source files, an HTML comment in `README.md` so the rendered page is
 unchanged.
@@ -52,7 +52,8 @@ decades away from the Python-stack lanes and the fused view is unusable. The
 offset `(CLOCK_REALTIME - CLOCK_MONOTONIC)` is computed once in `LoadConfig()`
 and subtracted per event in `WriteChromeTrace()`. A timestamp at or below the
 offset is left unchanged rather than subtracted, so it can never wrap `uint64`
-(it does *not* clamp to 0).
+(it does *not* clamp to 0). The event **duration** is *not* derived from the two
+shifted endpoints — see `patches/0004-duration-from-raw-endpoint-pair.patch`.
 
 Note this implements "framework/Python stack fusion", which upstream lists as a
 **non-goal** in `docs/design.md`. Keep it local unless upstream adopts it.
@@ -80,6 +81,49 @@ in an edit to an upstream licence document.
 
 Consumer: `src/third_party/cupti/README.md`.
 
+### `patches/0004-duration-from-raw-endpoint-pair.patch`
+
+`src/trace_writer.cc`. Takes each event's `"dur"` from the raw, unshifted
+endpoint pair instead of subtracting the two values patch 0002 shifted.
+
+Patch 0002 shifts `start_ns` and `end_ns` separately, which is only sound while
+both endpoints land on the same side of the offset. The offset is computed once
+in `LoadConfig()` and is roughly the wall-clock time at boot, so it is only
+valid while `CLOCK_REALTIME` keeps advancing. A step **backwards** by more than
+the uptime — a VM resumed from a snapshot with a stale RTC, an explicit
+`date -s`, or a large `chronyc makestep` on a host that booted with a badly
+wrong clock — puts later CUPTI timestamps below an offset derived from the
+pre-step clock. (Ordinary NTP slewing cannot: it would have to move the clock
+back past boot time.) An event that straddles the offset then gets one endpoint
+shifted and the other left alone, so
+`adj_end - adj_start` underflows `uint64` to roughly 1.8e19 ns. The emitted
+duration becomes ~1.8e16 us, which stretches Perfetto's time bounds by six
+orders of magnitude and flattens every real kernel into a single pixel, while
+`WriteChromeTrace()` still returns `true` and CollectionFramework still reports
+a successful collection. Nothing downstream can tell the trace is corrupt.
+
+An `end_ns` of `0` underflows the same way but cannot reach the writer through
+cuprof's own path: `IngestRecord` in `src/cupti_sink.cc` already drops records
+with `end == 0 || end < start`, for exactly this anti-wrap reason. It is fixed
+here anyway because `WriteChromeTrace()` is exported in `src/trace_writer.h` and
+cannot assume that every embedder filtered its records first.
+
+The trigger is narrow, so treat this as hardening an exported function rather
+than as a field bug: `WriteChromeTrace()` is declared in `src/trace_writer.h` and
+has no business assuming its caller kept the two endpoints on one side of a shift
+that the caller never sees. A duration is invariant under a uniform shift, so the
+raw pair is the correct source; a reversed or unset pair clamps to zero. Timestamps keep patch 0002's
+semantics exactly.
+
+Unlike 0002 this is not an AIProf-specific policy but a latent bug in the
+conversion 0002 introduces, so if 0002 is ever offered upstream this fix should
+travel with it.
+
+Consumer: `test/native/test_cuprof_trace_writer.cc`, which covers both shapes (a
+straddling event and an unset `end_ns`) and is the only automated coverage of
+either. Run it with `make test-native`; against the unfixed writer those two
+cases report durations of 1.67e16 us and 1.84e16 us.
+
 ## Re-syncing to a newer upstream
 
 ```bash
@@ -90,7 +134,7 @@ cd /tmp/cuprof-upstream && git checkout <new-base-commit>
 D=agent/collection_framework/src/plugins/cuprof
 rsync -a --delete --exclude='.git' --exclude='patches' --exclude='VENDOR.md' \
       /tmp/cuprof-upstream/ "$D"/
-cd "$D" && git apply patches/0001-*.patch patches/0002-*.patch patches/0003-*.patch
+cd "$D" && git apply patches/000*.patch
 ```
 
 A patch that no longer applies means upstream touched the same lines — resolve
@@ -114,8 +158,9 @@ After syncing, always:
    - `drift_guard_vendored_cuprof_keeps_the_cfg_filename_convention` — the
      `/tmp/cuprof_<pid>.cfg` path, which `write_cuprof_config()` writes into the
      target's namespace and `LoadCfgFile` must look for by exactly that name.
-3. The guards are substring checks, so also eyeball `src/cupti_sink.cc` and
-   `src/config.cc` for a rename that left the old string behind in a comment.
+3. The guards are substring checks and none of them covers
+   `src/trace_writer.cc`, so after a re-sync also run `make test-native` — it is
+   the only automated check on patches 0002 and 0004.
 4. Rebuild the client image — `deploy/docker/Dockerfile.client` stage 1b builds
    this tree with `nvidia/cuda:${CUDA_VERSION}-devel-${BUILDER_UBUNTU}`, which
    defaults to `12.2.0-devel-ubuntu20.04` (20.04 deliberately, so the injected
