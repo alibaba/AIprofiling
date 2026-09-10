@@ -23,8 +23,11 @@ bottleneck. It ships as two images (`aiprof/server`, `aiprof/client`).
   likewise not part of the compose stack.
 - `local-profiling-agent/` — Node CLI: trace ingest, evidence tools, LLM loop.
 - `ui/webapp/` — Vite + React + TypeScript + Ant Design (the shipped UI;
-  `src/pages/AIProf/` is current, `src/pages/ai_observable/` is legacy console
-  code). `ui/frontend/` and `ui/bff/` are an older static+proxy pair, undeployed.
+  `src/pages/AIProf/` is the main report UI; `src/pages/ai_observable/` is NOT
+  legacy — it hosts the CUDA memory-snapshot (MemoryViz) view that
+  `ProfileTab.tsx` embeds as an iframe (`/ai_observable/result?embed=memviz`),
+  and `dashboardServer.js` serves it via a static route). `ui/frontend/` and
+  `ui/bff/` are an older static+proxy pair, undeployed.
 - `deploy/docker/` — `Dockerfile.server`, `Dockerfile.client`, `docker-compose.yml`,
   `run-server.sh`, `run-client.sh`, `smoke.sh`, `README.md`, `README-split.md`.
   A second, divergent `Dockerfile.server.prebuilt` sits at the repo root.
