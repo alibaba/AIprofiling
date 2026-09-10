@@ -10,8 +10,9 @@ use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::{Mutex, OnceLock};
 use std::time::SystemTime;
 use tokio::fs;
 use tracing as log;
@@ -33,6 +34,175 @@ struct CuprofConfig {
     duration_sec: u32,
     verbose: bool,
     socket_path: String,
+}
+
+/// Which of several vendored files that share one SONAME should be staged.
+///
+/// There is no universally correct answer. CUPTI's ABI is fixed within a SONAME
+/// family, but its *minimum driver requirement* rises with each patch level, so
+/// the newest release covers the widest set of GPU architectures while the
+/// oldest one starts on the oldest drivers. Which of the two matters depends on
+/// the fleet, so the default is overridable at runtime rather than only by
+/// rebuilding the client image.
+#[derive(Debug, PartialEq, Eq)]
+enum CuptiPreference {
+    Highest,
+    Lowest,
+    Exact(String),
+}
+
+/// Parse `AIPROF_CUPTI_PREFER`. Split out from reading the environment so the
+/// fallbacks are testable without mutating process state.
+fn parse_cupti_preference(raw: Option<&str>) -> CuptiPreference {
+    match raw.unwrap_or("").trim() {
+        "" | "highest" => CuptiPreference::Highest,
+        "lowest" => CuptiPreference::Lowest,
+        name if name.starts_with("libcupti.so.") => CuptiPreference::Exact(name.to_string()),
+        other => {
+            log::warn!(
+                "AIPROF_CUPTI_PREFER='{}' is neither 'highest', 'lowest' nor a \
+                 libcupti.so.<version> file name; staging the highest release",
+                other
+            );
+            CuptiPreference::Highest
+        }
+    }
+}
+
+fn cupti_preference() -> CuptiPreference {
+    parse_cupti_preference(env::var("AIPROF_CUPTI_PREFER").ok().as_deref())
+}
+
+/// Rank a vendored `libcupti.so.<version>` file name: compare the dotted version
+/// component by component as numbers, so `2025.2.1` outranks `2024.3.2` and
+/// `10.2.75` outranks `9.0.176`. A plain string compare gets both wrong.
+///
+/// `None` means "not a release name". NVIDIA's convention is
+/// `libcupti.so.<major>.<minor>.<patch>`; a hand-made `libcupti.so.12` — the
+/// SONAME rather than a release — would compare as `[12]` and lose to
+/// `[2023, 2, 1]`, silently staging an older CUPTI, so anything with fewer than
+/// three numeric components is ranked below every conforming name instead.
+fn cupti_version_key(file_name: &str) -> Option<Vec<u64>> {
+    let components: Vec<&str> = file_name
+        .trim_start_matches("libcupti.so.")
+        .split('.')
+        .collect();
+    if components.len() < 3 {
+        return None;
+    }
+    components.iter().map(|c| c.parse::<u64>().ok()).collect()
+}
+
+/// Total order over candidate file names. The name is the final tie-break, so
+/// the result never depends on the order `read_dir` happened to yield.
+fn compare_cupti_candidates(a: &str, b: &str) -> std::cmp::Ordering {
+    cupti_version_key(a)
+        .cmp(&cupti_version_key(b))
+        .then_with(|| a.cmp(b))
+}
+
+/// Pick which of the candidates in one directory to stage, given that every one
+/// of them already matched the required SONAME.
+///
+/// Names that are not releases are held back rather than ranked inline.
+/// `cupti_version_key` maps them to `None` and `None` sorts *first*, so ranking
+/// them together with real releases would make `Lowest` prefer a hand-made
+/// `libcupti.so.12` over the oldest actual release — the exact outcome the
+/// ranking exists to prevent. They are used only when nothing conforming is
+/// present. An `Exact` pin is honoured against every candidate, conforming or
+/// not, because naming a file explicitly is an operator decision.
+fn pick_cupti_candidate<'a>(
+    candidates: &'a [String],
+    preference: &CuptiPreference,
+) -> Option<&'a str> {
+    let names: Vec<&'a str> = candidates.iter().map(String::as_str).collect();
+    let (releases, others): (Vec<&str>, Vec<&str>) = names
+        .iter()
+        .copied()
+        .partition(|name| cupti_version_key(name).is_some());
+    let pool: &[&str] = if releases.is_empty() { &others } else { &releases };
+
+    if let CuptiPreference::Exact(wanted) = preference {
+        if let Some(hit) = names.iter().copied().find(|name| *name == wanted.as_str()) {
+            return Some(hit);
+        }
+    }
+    match preference {
+        CuptiPreference::Lowest => pool
+            .iter()
+            .copied()
+            .min_by(|&a, &b| compare_cupti_candidates(a, b)),
+        CuptiPreference::Highest | CuptiPreference::Exact(_) => pool
+            .iter()
+            .copied()
+            .max_by(|&a, &b| compare_cupti_candidates(a, b)),
+    }
+}
+
+/// `DT_SONAME` of a file, memoised.
+///
+/// `utils::read_soname` reads the whole file to reach the dynamic section and a
+/// vendored libcupti is 4-8 MB, so ranking every candidate means reading the
+/// whole directory (~67 MB) once per injection. The vendored tree cannot change
+/// under a running agent, so one parse per file per process is enough.
+fn soname_of(path: &Path) -> Option<String> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
+
+    // Canonicalise the key: in the shipped image the same directory is reached
+    // both as `./cupti` and as `/opt/aiprof/cupti`, and keying on the spelling
+    // would parse the same 4-8 MB binary twice.
+    let key = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    {
+        let map = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(hit) = map.get(&key) {
+            return Some(hit.clone());
+        }
+    }
+
+    // Parsed outside the lock: read_soname reads the whole file, and holding a
+    // process-wide mutex across an 8 MB read would serialise every caller.
+    let soname = match utils::read_soname(key.to_string_lossy().as_ref()) {
+        Ok(soname) => soname,
+        Err(e) => {
+            // Deliberately not cached. A transient failure - EMFILE under the
+            // unix socket handler's per-connection churn, EIO on overlayfs -
+            // would otherwise disable staging for this file for the whole
+            // process lifetime and surface only as "no vendored libcupti found".
+            log::warn!("cannot read the soname of {}: {}", key.display(), e);
+            return None;
+        }
+    };
+    cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(key, soname.clone());
+    Some(soname)
+}
+
+/// Unique temporary name a vendored libcupti is staged under before being
+/// `rename(2)`d into place: `.cupti-staging-<agent pid>-<nanos hex>-<target
+/// pid>`.
+///
+/// It deliberately does **not** start with `libcupti.so.`, so a leftover from a
+/// crash between the copy and the rename can never be picked up as a candidate
+/// on a later run; the leading dot also keeps it out of a casual `ls`. Both
+/// error paths in `stage_cupti_runtime` unlink it.
+///
+/// The one residue that cannot be covered is a `SIGKILL` landing between the
+/// copy and the rename, which leaves one hidden 4-8 MB file in the target's
+/// `/tmp` until that `/tmp` is reclaimed. `Drop` is no use there — it does not
+/// run after `SIGKILL` — and scanning the target's `/tmp` for leftovers instead
+/// would have to match on a pid that is only unique within a pid namespace, so
+/// two agents sharing a target could unlink each other's in-flight staging file.
+/// One stranded file is the cheaper failure.
+fn cupti_staging_name(target_pid: i32, unique: u128) -> String {
+    format!(
+        ".cupti-staging-{}-{:x}-{}",
+        process::id(),
+        unique,
+        target_pid
+    )
 }
 
 impl CUPTIPluginWrapper {
@@ -130,8 +300,8 @@ impl CUPTIPluginWrapper {
     // into the target process's /tmp, so it sits next to $ORIGIN when dlopen
     // runs after injection.
     // Selection strategy: read libcuprof.so's DT_NEEDED, find the entry of the
-    // form libcupti.so.<major>, then copy the vendored candidate whose soname
-    // matches exactly.
+    // form libcupti.so.<major>, then copy the highest-release vendored
+    // candidate whose soname matches exactly.
     fn stage_cupti_runtime(&self, cuprof_src: &str, target_pid: i32) -> Result<()> {
         let needed = utils::read_needed_soname(cuprof_src, "libcupti.so.")
             .context("cannot determine libcupti soname required by libcuprof.so")?;
@@ -144,33 +314,85 @@ impl CUPTIPluginWrapper {
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| Path::new(".").to_path_buf());
-        let mut search_dirs = vec![cuprof_dir.join("cupti"), cuprof_dir.clone()];
+        // Canonicalised before being de-duplicated, and that order matters. In
+        // the shipped image config.yaml names `/libcuprof.so` but the first
+        // candidate tried is `./libcuprof.so`, which resolves because WORKDIR is
+        // /opt/aiprof; cuprof_dir is therefore `.` while current_exe() gives
+        // `/opt/aiprof`. Compared as written those four entries are all
+        // distinct, so the two real directories would each be scanned twice -
+        // every candidate parsed twice on the no-match path, and the same path
+        // listed twice in the error below.
+        let mut wanted = vec![cuprof_dir.join("cupti"), cuprof_dir.clone()];
         if let Ok(exe_path) = env::current_exe() {
             if let Some(parent) = exe_path.parent() {
-                search_dirs.push(parent.join("cupti"));
-                search_dirs.push(parent.to_path_buf());
+                wanted.push(parent.join("cupti"));
+                wanted.push(parent.to_path_buf());
+            }
+        }
+        let mut search_dirs: Vec<PathBuf> = Vec::with_capacity(wanted.len());
+        for dir in wanted {
+            let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+            if !search_dirs.contains(&dir) {
+                search_dirs.push(dir);
             }
         }
 
+        let preference = cupti_preference();
+
         let mut chosen: Option<std::path::PathBuf> = None;
         for dir in &search_dirs {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    let name = entry.file_name();
-                    let name = name.to_string_lossy();
-                    if !name.starts_with("libcupti.so.") {
-                        continue;
-                    }
-                    if let Ok(soname) = utils::read_soname(path.to_string_lossy().as_ref()) {
-                        if soname == needed {
-                            chosen = Some(path);
-                            break;
-                        }
-                    }
+            let entries = match std::fs::read_dir(dir) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+
+            // Several vendored files can carry the same SONAME - this tree
+            // ships four releases whose SONAME is `libcupti.so.12` - and
+            // `read_dir` yields them in directory order, which is neither
+            // sorted nor stable across filesystems. Taking the first hit
+            // therefore let the same client image stage CUPTI 12.1 on one host
+            // and 12.8 on another, which changes the minimum driver the target
+            // needs and the set of GPUs CUPTI recognises. Rank every match
+            // instead, and say so in the log when the choice was not forced.
+            let mut candidates: Vec<String> = Vec::new();
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if !name.starts_with("libcupti.so.") {
+                    continue;
+                }
+                if soname_of(&entry.path()).as_deref() == Some(needed.as_str()) {
+                    candidates.push(name);
                 }
             }
-            if chosen.is_some() {
+
+            let best = pick_cupti_candidate(&candidates, &preference);
+            if let (CuptiPreference::Exact(wanted), Some(picked)) = (&preference, best) {
+                if picked != wanted.as_str() {
+                    log::warn!(
+                        "AIPROF_CUPTI_PREFER='{}' is not among the vendored files in {} whose \
+                         soname is '{}' ({}); staging {} instead",
+                        wanted,
+                        dir.display(),
+                        needed,
+                        candidates.join(", "),
+                        picked
+                    );
+                }
+            }
+            if let Some(best) = best {
+                if candidates.len() > 1 {
+                    log::info!(
+                        "{} vendored libcupti files in {} share soname '{}', staging {} \
+                         (preference {:?}, candidates: {})",
+                        candidates.len(),
+                        dir.display(),
+                        needed,
+                        best,
+                        preference,
+                        candidates.join(", ")
+                    );
+                }
+                chosen = Some(dir.join(best));
                 break;
             }
         }
@@ -183,9 +405,39 @@ impl CUPTIPluginWrapper {
             .into_error()
         })?;
 
+        // Stage through a unique temporary name and rename(2) it into place.
+        // libcuprof.so is linked `-z nodelete`, so a libcupti staged for an
+        // earlier collection window is still mapped in the target: copying
+        // straight onto the final name truncates and rewrites that live inode,
+        // and the target then dies with SIGBUS on its next page-in. rename()
+        // swaps the directory entry instead - the mapped inode survives intact
+        // and the staged file is a fresh one. It also stops two collections
+        // against targets that share a /tmp from racing on the same name. The
+        // temporary name deliberately does not start with `libcupti.so.`, so a
+        // leftover can never be mistaken for a staging candidate, and both error
+        // paths below unlink it.
         let dst = format!("/proc/{}/root/tmp/{}", target_pid, needed);
-        utils::copy_file(chosen.to_string_lossy().as_ref(), &dst, false)
-            .with_context(|| format!("failed to stage {} for target", needed))?;
+        let unique = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let staging = format!(
+            "/proc/{}/root/tmp/{}",
+            target_pid,
+            cupti_staging_name(target_pid, unique)
+        );
+
+        if let Err(e) = utils::copy_file(chosen.to_string_lossy().as_ref(), &staging, false) {
+            let _ = std::fs::remove_file(&staging);
+            return Err(e).context(format!("failed to stage {} for target", needed));
+        }
+        if let Err(e) = std::fs::rename(&staging, &dst) {
+            let _ = std::fs::remove_file(&staging);
+            return Err(anyhow::Error::new(e).context(format!(
+                "failed to move staged {} into place at {}",
+                needed, dst
+            )));
+        }
         log::info!(
             "Staged vendored CUPTI {} -> {} (soname {})",
             chosen.display(),
@@ -489,13 +741,17 @@ impl Drop for CUPTIPluginWrapper {
     fn drop(&mut self) {
         log::debug!("Dropping CuptiPluginWrapper, cleaning up resources...");
 
-        // Clean up socket and config files, but do NOT delete
-        // libcuprof.so / libcupti.so: the target's dlopen holds an mmap
-        // on them, and removing the .so while the target is alive causes
-        // later kernel page-ins to raise SIGBUS and kill the target.
-        // These files under /tmp are small (<1MB); once the target exits,
-        // /proc/<pid>/root is gone and the files are cleaned up naturally
-        // (or left in the target's /tmp for the OS to reclaim).
+        // Clean up socket and config files, but do NOT touch
+        // libcuprof.so / libcupti.so. libcuprof.so is linked `-z nodelete`, so
+        // it and the libcupti it pulled in stay mapped in the target for the
+        // target's whole lifetime, and rewriting one of those files in place
+        // makes the next kernel page-in raise SIGBUS and kill the customer
+        // process - which is why stage_cupti_runtime() renames a fresh copy
+        // into place rather than overwriting the name. Unlinking the name
+        // alone would be survivable but reclaims nothing while the inode is
+        // still mapped, and a staged libcupti is 4-8 MB rather than the <1MB
+        // this cleanup used to assume. Once the target exits,
+        // /proc/<pid>/root is gone and the files are reclaimed with it.
         for (pid, _) in &self.status {
             let cf_sock_path = format!("/proc/{}/root{}{}", pid, r#const::CF_UNIXSOCK, pid);
             if let Ok(_) = std::fs::remove_file(&cf_sock_path) {
@@ -534,5 +790,197 @@ impl GenericPlugin for CUPTIPluginWrapper {
                 Ok(Value::Null)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        compare_cupti_candidates, cupti_staging_name, cupti_version_key, parse_cupti_preference,
+        pick_cupti_candidate, CuptiPreference,
+    };
+
+    // Four of the ten vendored binaries carry SONAME `libcupti.so.12`
+    // (2023.2.1, 2024.1.1, 2024.3.2, 2025.2.1), so which one gets staged used to
+    // be decided by `read_dir` order. These tests pin the ranking down without a
+    // GPU, an ELF, or a target process.
+
+    const SONAME_12: [&str; 4] = [
+        "libcupti.so.2024.3.2",
+        "libcupti.so.2023.2.1",
+        "libcupti.so.2025.2.1",
+        "libcupti.so.2024.1.1",
+    ];
+
+    fn owned(list: &[&str]) -> Vec<String> {
+        list.iter().map(|name| name.to_string()).collect()
+    }
+
+    #[test]
+    fn version_key_orders_releases_numerically_not_lexically() {
+        // A string compare puts "9.0.176" after "2025.2.1" (because '9' > '2')
+        // and "10.2.75" before "9.0.176". Both are wrong for version ordering.
+        assert!("libcupti.so.9.0.176" > "libcupti.so.2025.2.1");
+        assert!(
+            cupti_version_key("libcupti.so.10.2.75") > cupti_version_key("libcupti.so.9.0.176")
+        );
+        assert!(
+            cupti_version_key("libcupti.so.2025.2.1") > cupti_version_key("libcupti.so.9.0.176")
+        );
+        assert!(
+            cupti_version_key("libcupti.so.2024.3.2") > cupti_version_key("libcupti.so.2024.1.1")
+        );
+    }
+
+    #[test]
+    fn a_name_that_is_not_a_release_ranks_below_every_real_one() {
+        // `libcupti.so.12` is a SONAME, not a release. Compared as a version it
+        // would be [12] and lose to [2023, 2, 1], silently staging an older
+        // CUPTI, so it is not treated as a version at all.
+        assert_eq!(cupti_version_key("libcupti.so.12"), None);
+        assert_eq!(cupti_version_key("libcupti.so.bogus"), None);
+        assert!(cupti_version_key("libcupti.so.9.0.176") > cupti_version_key("libcupti.so.12"));
+
+        // `None` sorts *first* ascending, so a non-release name has to be held
+        // back rather than ranked inline: otherwise Highest skips it correctly
+        // but Lowest picks it, which is the very outcome the ranking prevents.
+        let mixed = owned(&["libcupti.so.12", "libcupti.so.2023.2.1", "libcupti.so.2025.2.1"]);
+        assert_eq!(
+            pick_cupti_candidate(&mixed, &CuptiPreference::Highest),
+            Some("libcupti.so.2025.2.1")
+        );
+        assert_eq!(
+            pick_cupti_candidate(&mixed, &CuptiPreference::Lowest),
+            Some("libcupti.so.2023.2.1")
+        );
+        // With nothing conforming present, a non-release name is still better
+        // than failing the injection.
+        assert_eq!(
+            pick_cupti_candidate(&owned(&["libcupti.so.12"]), &CuptiPreference::Lowest),
+            Some("libcupti.so.12")
+        );
+    }
+
+    #[test]
+    fn an_exact_pin_is_honoured_even_for_a_name_that_is_not_a_release() {
+        // Naming a file explicitly is an operator decision, so it is looked up
+        // against every candidate rather than only the ranked ones.
+        assert_eq!(
+            pick_cupti_candidate(
+                &owned(&["libcupti.so.12", "libcupti.so.2023.2.1"]),
+                &CuptiPreference::Exact("libcupti.so.12".to_string())
+            ),
+            Some("libcupti.so.12")
+        );
+    }
+
+    #[test]
+    fn the_highest_release_wins_whatever_order_the_directory_yielded() {
+        let mut rotated = owned(&SONAME_12);
+        for _ in 0..SONAME_12.len() {
+            assert_eq!(
+                pick_cupti_candidate(&rotated, &CuptiPreference::Highest),
+                Some("libcupti.so.2025.2.1")
+            );
+            rotated.rotate_left(1);
+        }
+        let mut sorted = owned(&SONAME_12);
+        sorted.sort();
+        assert_eq!(
+            pick_cupti_candidate(&sorted, &CuptiPreference::Highest),
+            Some("libcupti.so.2025.2.1")
+        );
+        // The order is total, so min and max are the two ends of one ordering.
+        assert!(compare_cupti_candidates("libcupti.so.2023.2.1", "libcupti.so.2025.2.1").is_lt());
+    }
+
+    #[test]
+    fn the_lowest_preference_picks_the_oldest_release() {
+        // The escape hatch for a fleet whose drivers predate the newest patch
+        // level in a SONAME family: CUPTI's minimum driver rises with it.
+        assert_eq!(
+            pick_cupti_candidate(&owned(&SONAME_12), &CuptiPreference::Lowest),
+            Some("libcupti.so.2023.2.1")
+        );
+    }
+
+    #[test]
+    fn an_exact_preference_pins_a_named_release() {
+        assert_eq!(
+            pick_cupti_candidate(
+                &owned(&SONAME_12),
+                &CuptiPreference::Exact("libcupti.so.2024.1.1".to_string())
+            ),
+            Some("libcupti.so.2024.1.1")
+        );
+    }
+
+    #[test]
+    fn an_exact_preference_that_is_not_present_falls_back_to_the_default() {
+        // Naming a release that is not vendored, or one whose SONAME does not
+        // match, must not fail the injection: fall back and warn instead.
+        assert_eq!(
+            pick_cupti_candidate(
+                &owned(&SONAME_12),
+                &CuptiPreference::Exact("libcupti.so.2025.3.1".to_string())
+            ),
+            Some("libcupti.so.2025.2.1")
+        );
+    }
+
+    #[test]
+    fn a_lone_candidate_wins_and_an_empty_set_yields_none() {
+        assert_eq!(
+            pick_cupti_candidate(&owned(&["libcupti.so.2025.3.1"]), &CuptiPreference::Highest),
+            Some("libcupti.so.2025.3.1")
+        );
+        assert_eq!(pick_cupti_candidate(&[], &CuptiPreference::Highest), None);
+        assert_eq!(pick_cupti_candidate(&[], &CuptiPreference::Lowest), None);
+    }
+
+    #[test]
+    fn preference_parsing_defaults_to_highest_and_rejects_junk() {
+        assert_eq!(parse_cupti_preference(None), CuptiPreference::Highest);
+        assert_eq!(parse_cupti_preference(Some("")), CuptiPreference::Highest);
+        assert_eq!(parse_cupti_preference(Some("  ")), CuptiPreference::Highest);
+        assert_eq!(
+            parse_cupti_preference(Some("highest")),
+            CuptiPreference::Highest
+        );
+        assert_eq!(
+            parse_cupti_preference(Some(" lowest ")),
+            CuptiPreference::Lowest
+        );
+        assert_eq!(
+            parse_cupti_preference(Some("libcupti.so.2023.2.1")),
+            CuptiPreference::Exact("libcupti.so.2023.2.1".to_string())
+        );
+        // A typo is not a policy: warn and keep the default.
+        assert_eq!(
+            parse_cupti_preference(Some("newest")),
+            CuptiPreference::Highest
+        );
+        assert_eq!(
+            parse_cupti_preference(Some("/etc/passwd")),
+            CuptiPreference::Highest
+        );
+    }
+
+    #[test]
+    fn the_staging_name_can_never_be_mistaken_for_a_candidate() {
+        // The whole point of staging through a temporary name is that a leftover
+        // cannot be picked up by a later run, which only holds if the name is
+        // outside the `libcupti.so.` filter the scan uses.
+        let name = cupti_staging_name(4242, 0xdeadbeef);
+        assert!(!name.starts_with("libcupti.so."), "{}", name);
+        assert!(name.starts_with(".cupti-staging-"), "{}", name);
+        assert!(
+            name.contains(&format!("{}", std::process::id())),
+            "{}",
+            name
+        );
+        assert!(name.contains("4242"), "{}", name);
+        // Two calls with different uniques must not collide.
+        assert_ne!(name, cupti_staging_name(4242, 0xdeadbef0));
     }
 }
