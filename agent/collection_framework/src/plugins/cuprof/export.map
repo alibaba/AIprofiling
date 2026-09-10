@@ -1,0 +1,7 @@
+{
+  global:
+    cuprof_start;
+    InitializeInjection;
+  local:
+    *;
+};

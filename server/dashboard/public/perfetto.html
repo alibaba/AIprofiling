@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AIProf · Perfetto 打开 Trace</title>
+  <style>
+    :root { color-scheme: light dark; }
+    html, body { margin:0; padding:0; height:100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif; background:#0f172a; color:#e2e8f0; }
+    .wrap { display:flex; flex-direction:column; height:100%; }
+    header { padding:14px 22px; background:linear-gradient(90deg,#1e3a8a,#0f172a); border-bottom:1px solid #1f2937; display:flex; align-items:center; gap:14px; }
+    header h1 { margin:0; font-size:16px; font-weight:600; }
+    header .meta { font-size:12px; color:#94a3b8; }
+    .card { max-width: 720px; margin: 24px auto; padding: 20px 26px; background:#111827; border:1px solid #1f2937; border-radius:10px; }
+    .card h2 { margin:0 0 10px; font-size:15px; color:#e5e7eb; font-weight:600; }
+    .card p { margin:6px 0; color:#94a3b8; line-height:1.55; font-size:13px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
+    input { flex:1 1 320px; padding:8px 10px; background:#0b1220; color:#e2e8f0; border:1px solid #334155; border-radius:6px; font-size:13px; font-family: SFMono-Regular,Consolas,Menlo,monospace; }
+    button { padding:8px 16px; background:#2563eb; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
+    button:hover { background:#1d4ed8; }
+    button.ghost { background:transparent; border:1px solid #334155; color:#cbd5e1; }
+    #status { margin-top:14px; font-size:12px; color:#94a3b8; min-height:18px; }
+    #status.err { color:#f87171; }
+    #status.ok { color:#4ade80; }
+    a { color:#60a5fa; }
+    code { background:#1f2937; padding:1px 6px; border-radius:4px; color:#e5e7eb; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>AIProf · 在 Perfetto UI 中打开 Trace</h1>
+      <span class="meta">规则式分析 · 无 LLM 参与</span>
+    </header>
+    <div class="card">
+      <h2>说明</h2>
+      <p>此页面按 <code>analysisId</code> 从 AIProf dashboardServer 拉取已落盘的 Chrome-Trace JSON，通过 <a href="https://ui.perfetto.dev" target="_blank" rel="noreferrer">ui.perfetto.dev</a> 的 postMessage 协议直传打开。</p>
+      <p>用法：URL 里带上 <code>?analysisId=&lt;uuid&gt;</code>（可选 <code>&amp;pid=&lt;pid&gt;</code>）后打开本页，会自动开始加载；或用下方输入手动触发。</p>
+      <div class="row">
+        <input id="analysisId" placeholder="analysisId (UUID)" />
+        <input id="pid" placeholder="pid (可选)" style="flex:0 0 140px" />
+        <button id="go">在 Perfetto 打开</button>
+        <button id="download" class="ghost">下载 trace</button>
+      </div>
+      <div id="status"></div>
+    </div>
+  </div>
+
+<script>
+const ORIGIN = 'https://ui.perfetto.dev';
+const $ = (id) => document.getElementById(id);
+const status = (msg, cls) => { const s=$('status'); s.textContent = msg; s.className = cls || ''; };
+
+function traceUrl(analysisId, pid) {
+  const p = new URLSearchParams({ analysisId });
+  if (pid) p.set('pid', pid);
+  return '/api/v1/app_observ/aiAnalysis/trace?' + p.toString();
+}
+
+async function openInPerfetto(analysisId, pid) {
+  if (!analysisId) { status('请输入 analysisId', 'err'); return; }
+  status('从 AIProf 拉取 trace…');
+  let buf;
+  try {
+    const resp = await fetch(traceUrl(analysisId, pid));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + await resp.text());
+    buf = await resp.arrayBuffer();
+  } catch (e) {
+    status('拉取失败: ' + e.message, 'err');
+    return;
+  }
+  status('已拉取 ' + (buf.byteLength/1024/1024).toFixed(1) + ' MB，握手 Perfetto UI…');
+  const win = window.open(ORIGIN);
+  if (!win) { status('弹窗被拦截，请允许弹出后重试', 'err'); return; }
+  // Perfetto 官方推荐 PING/PONG 握手：目标窗口就绪后回 PONG，然后 postMessage {perfetto:{buffer,title}}
+  const fileName = 'aiprof-' + analysisId + (pid ? '-pid' + pid : '') + '.json';
+  const timer = setInterval(() => {
+    try { win.postMessage('PING', ORIGIN); } catch {}
+  }, 250);
+  const onMsg = (evt) => {
+    if (evt.origin !== ORIGIN) return;
+    if (evt.data !== 'PONG') return;
+    clearInterval(timer);
+    window.removeEventListener('message', onMsg);
+    win.postMessage({ perfetto: { buffer: buf, title: fileName, fileName } }, ORIGIN);
+    status('已交给 Perfetto UI 渲染。若长时间空白，可刷新新窗口重试。', 'ok');
+  };
+  window.addEventListener('message', onMsg);
+  setTimeout(() => { clearInterval(timer); }, 30000);
+}
+
+// 初始化：从 URL / localStorage 恢复
+(() => {
+  const q = new URLSearchParams(location.search);
+  const aid = q.get('analysisId') || '';
+  const pid = q.get('pid') || '';
+  if (aid) $('analysisId').value = aid;
+  if (pid) $('pid').value = pid;
+  $('go').addEventListener('click', () => openInPerfetto($('analysisId').value.trim(), $('pid').value.trim()));
+  $('download').addEventListener('click', () => {
+    const a = $('analysisId').value.trim(); if (!a) return;
+    location.href = traceUrl(a, $('pid').value.trim());
+  });
+  if (aid) openInPerfetto(aid, pid);
+})();
+</script>
+</body>
+</html>

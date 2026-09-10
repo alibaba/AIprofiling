@@ -1,0 +1,17 @@
+---
+Language: Cpp
+BasedOnStyle: Google
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 80
+SortIncludes: false
+AlignAfterOpenBracket: Align
+PackConstructorInitializers: Never
+RemoveBracesLLVM: false
+RemoveEmptyLinesInUnwrappedLines: true
+BreakBeforeBraces: Custom
+BraceWrapping:
+  BeforeElse: true
+AllowShortLambdasOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never

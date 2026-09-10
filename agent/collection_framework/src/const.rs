@@ -1,0 +1,16 @@
+pub const DEFAULT_PATH: &'static str = "/tmp";
+pub const INJECTOR_SLEEP_BEFORE_RETRY: u64 = 100000;
+pub const START_PYKI_COLLECTOR: &'static str = "STARTPYKICOLLECTOR";
+pub const STOP_PYKI_COLLECTOR: &'static str = "STOPPYKICOLLECTOR";
+pub const PYKI_DEFAULT_TIMEOUT: u64 = 30;
+pub const PYTHON_TRACER_MAX_DEPTH: u64 = 128;
+pub const CF_UNIXSOCK: &'static str = "/tmp/.cf_sock_";
+pub const DEFAULT_PREFIX: &'static str = "AIProf_";
+pub const PYKI_VERSION: &'static str = "v0_2_37";
+pub const PYKI_VERSION_IN: &'static str = "0.2.37";
+pub const LOADER_DST_PATH: &'static str = "/tmp/cf_loader_";
+pub const CUPTI_DST_PATH: &'static str = "/tmp/cf_loader_cupti_";
+pub const START_CUPTI_COLLECTOR: &'static str = "CUPTIProfilingStart";
+pub const STOP_CUPTI_COLLECTOR: &'static str = "CUPTIProfilingStop";
+pub const FINISH_CUPTI_COLLECTOR: &'static str = "CUPTIProfilingWriterOver";
+pub const FAILED_CUPTI_COLLECTOR: &'static str = "CUPTIProfilingFailed";

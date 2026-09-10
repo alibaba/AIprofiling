@@ -1,0 +1,27 @@
+# Vendored into AIProf CF, whose top-level Cargo.toml is a workspace root.
+# An empty [workspace] table keeps this crate out of that workspace so it
+# builds standalone (as it does in the upstream pyki repo).
+[workspace]
+
+[package]
+name = "pyki"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[lib]
+name = "pyki_rust_lib"
+crate-type = ["staticlib"]
+
+[dependencies]
+chrono = "0.4.42"
+flate2 = "1.1.4"
+prost = "0.14.1"
+
+[profile.release]
+panic = "abort"
+
+[profile.dev]
+panic = "abort"
+opt-level = 0 # -O0
+debug = true # -g

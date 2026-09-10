@@ -1,0 +1,103 @@
+{
+  "rocprofiler-sdk-tool": [
+    {
+      "metadata": {
+        "pid": 12345,
+        "init_time": 1000000000,
+        "fini_time": 2000000000
+      },
+      "agents": [
+        {
+          "id": { "handle": 1 },
+          "type": 2,
+          "name": "gfx942"
+        }
+      ],
+      "kernel_symbols": [
+        {
+          "kernel_id": 42,
+          "code_object_id": 1,
+          "kernel_name": "_Z6matmulPfS_S_ii",
+          "formatted_kernel_name": "matmul(float*, float*, float*, int, int)",
+          "demangled_kernel_name": "matmul(float*, float*, float*, int, int)",
+          "truncated_kernel_name": "matmul"
+        }
+      ],
+      "strings": {
+        "buffer_records": [
+          {
+            "kind": "HIP_RUNTIME_API",
+            "operations": ["hipUnknown", "hipMalloc", "hipMemcpyAsync", "hipLaunchKernel"]
+          },
+          {
+            "kind": "HSA_CORE_API",
+            "operations": ["hsa_init", "hsa_shut_down"]
+          },
+          {
+            "kind": "MEMORY_COPY",
+            "operations": ["MEMORY_COPY_NONE", "MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST", "MEMORY_COPY_DEVICE_TO_DEVICE"]
+          }
+        ]
+      },
+      "buffer_records": {
+        "kernel_dispatch": [
+          {
+            "kind": 8,
+            "operation": 0,
+            "thread_id": 700001,
+            "correlation_id": { "internal": 1, "external": 0 },
+            "start_timestamp": 1100000000,
+            "end_timestamp": 1100500000,
+            "dispatch_info": {
+              "agent_id": { "handle": 1 },
+              "queue_id": { "handle": 7 },
+              "kernel_id": 42,
+              "dispatch_id": 1
+            }
+          }
+        ],
+        "hip_api": [
+          {
+            "kind": 1,
+            "operation": 3,
+            "correlation_id": { "internal": 2, "external": 0 },
+            "start_timestamp": 1090000000,
+            "end_timestamp": 1090020000,
+            "thread_id": 700001
+          },
+          {
+            "kind": 1,
+            "operation": 1,
+            "correlation_id": { "internal": 3, "external": 0 },
+            "start_timestamp": 1050000000,
+            "end_timestamp": 1050100000,
+            "thread_id": 700001
+          }
+        ],
+        "hsa_api": [
+          {
+            "kind": 3,
+            "operation": 0,
+            "correlation_id": { "internal": 4, "external": 0 },
+            "start_timestamp": 1010000000,
+            "end_timestamp": 1010005000,
+            "thread_id": 700001
+          }
+        ],
+        "memory_copy": [
+          {
+            "kind": 10,
+            "operation": 1,
+            "correlation_id": { "internal": 5, "external": 0 },
+            "start_timestamp": 1060000000,
+            "end_timestamp": 1060300000,
+            "thread_id": 700001,
+            "dst_agent_id": { "handle": 1 },
+            "src_agent_id": { "handle": 0 },
+            "bytes": 4194304
+          }
+        ]
+      }
+    }
+  ]
+}

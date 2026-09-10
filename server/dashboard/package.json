@@ -1,0 +1,16 @@
+{
+  "name": "aiprof-dashboard-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AIProf dashboard server: WS control plane + upload/query REST",
+  "scripts": {
+    "start": "node dashboardServer.js",
+    "build:analysis": "bash build.sh"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "cors": "^2.8.5",
+    "multer": "^1.4.5-lts.1",
+    "ws": "^8.19.0"
+  }
+}

@@ -1,0 +1,83 @@
+
+# config.yaml
+# config.yaml中的所有路径都是: 可执行文件的相对路径(安装路径的相对路径)
+resources:
+  - name: CPU
+    dependencies:
+    - detector: detect_cpu_support
+      threshold: "> 95"
+      unit: "%"
+  - name: MEM
+    dependencies:
+    - detector: detect_mem_support
+      threshold: "< 0.5"
+      unit: GB/s/proc
+
+# 同一个指标按照顺序判断优先级
+# GPU kernel 默认走 PYKI (torch.profiler activities=cpu,gpu)，与 Torch/PyStack/
+# Snapshot 三类指标共用同一次 pyki-inject。CUPTI (基于 cuprof) 只作为极少数
+# 场景的兜底 —— 例如目标进程没有 PyTorch 或者 torch<2.1 等 PYKI 依赖不满足时
+# 才会被 detector 选中。
+indicators:
+  - name: GPU
+    collectors:
+      - name: PYKI
+        path: "/libloader.so"
+        config_path: ""
+        dependencies:
+          - detector: detect_python_support
+            min_version: "3.9"
+            max_version: "3.12"
+          - detector: detect_nvidia_or_ppu
+          - detector: detect_torch_support
+            min_version: "2.1.0"
+          - detector: detect_cuda_support
+            min_version: "12.0"
+            max_version: "12.8"
+          - detector: detect_pip_support
+      - name: CUPTI
+        path: "/libcuprof.so"
+        config_path: ""
+        dependencies:
+          - detector: detect_nvidia
+          - detector: detect_cuda_support
+            min_version: "12.0"
+            max_version: "12.8"
+
+  - name: Torch
+    collectors:
+      - name: PYKI
+        path: "/libloader.so"
+        config_path: ""
+        dependencies:
+          - detector: detect_nvidia_or_ppu
+          - detector: detect_torch_support
+            min_version: "2.1.0"
+          - detector: detect_pip_support
+          - detector: detect_python_support
+            min_version: "3.9"
+            max_version: "3.12"
+
+  - name: PyStack
+    collectors:
+    - name: PYKI
+      path: "/libloader.so"
+      config_path: ""
+      dependencies:
+        - detector: detect_python_support
+          min_version: "3.9"
+          max_version: "3.12"
+        - detector: detect_pip_support
+
+  - name: Snapshot
+    collectors:
+    - name: PYKI
+      path: "/libloader.so"
+      config_path: ""
+      dependencies:
+        - detector: detect_python_support
+          min_version: "3.9"
+          max_version: "3.12"
+        - detector: detect_torch_support
+          min_version: "2.3.0"
+        - detector: detect_pip_support

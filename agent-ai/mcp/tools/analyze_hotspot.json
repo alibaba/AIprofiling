@@ -1,0 +1,17 @@
+{
+    "name": "analyze_hotspot",
+    "description": "Ask the AIProf AI gateway to analyze the top hotspots of a session and suggest optimizations. Returns a natural-language report.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "session_id": {"type": "string"},
+            "focus": {
+                "type": "string",
+                "enum": ["cpu", "gpu", "python", "auto"],
+                "default": "auto"
+            },
+            "top_k": {"type": "integer", "default": 10}
+        },
+        "required": ["session_id"]
+    }
+}

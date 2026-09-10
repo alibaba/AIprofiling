@@ -1,0 +1,167 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# aiprof_client — profiling agent image
+#
+# Contains:
+#   * CollectionFramework (Rust) — the on-host injector/collector
+#   * client (Rust)              — WS agent that pulls tasks from
+#                                  aiprof-server and tar-uploads results
+#   * vendored .so tree          — libcupti/libdcgm/libnvidia-ml/…
+#   * pyki (Python)              — CPython struct extractor + torch profiler
+#
+# Runtime requirements on the HOST:
+#   * NVIDIA GPU + nvidia-container-toolkit (`--gpus all`)
+#   * ability to ptrace target process → `--pid=host --cap-add=SYS_PTRACE`
+#
+# Two run modes:
+#   1) Long-lived agent — talks to aiprof-server, waits for tasks
+#        docker run -d --name aiprof-client --network host \
+#          --pid=host --cap-add=SYS_PTRACE --gpus all \
+#          -e SERVER_HOST=<host>:17000 \
+#          -v /sys/kernel/debug:/sys/kernel/debug:ro \
+#          -v aiprof-data:/var/lib/aiprof \
+#          aiprof/client:latest
+#      Behind a reverse proxy that strips the WS `Upgrade` header, add
+#      `-e TRANSPORT=poll -e SERVER_HOST=https://<gateway-host>/<prefix>`
+#      to use the HTTP long-poll control plane instead of WebSocket.
+#
+#   2) One-shot capture — directly invokes CollectionFramework
+#        mkdir -p "$PWD/out"   # --output must already exist: a missing path
+#                              # makes command.rs fall back to "default" and
+#                              # write AIProf_OFFSET.json into the container's
+#                              # own /tmp, which --rm then discards
+#        docker run --rm --pid=host --cap-add=SYS_PTRACE --gpus all \
+#          -v "$PWD/out:/tmp/out" \
+#          --entrypoint /opt/aiprof/CollectionFramework aiprof/client:latest \
+#          profile --pids <target-pid> --duration 10 --gpu true --torch true \
+#          --output /tmp/out
+#        (`profile` is a required subcommand and the flag is --pids, not --pid.
+#         Run `CollectionFramework profile --help` for the full set.)
+
+# ---------- Global build args ----------
+# CUDA_VERSION selects which CUDA toolkit image supplies CUPTI headers for
+# libcuprof.so, AND which CUDA runtime the final image is based on. It MUST
+# match the host NVIDIA driver's CUDA major (see `nvidia-smi` on the host)
+# for the CUPTI collector to work — otherwise cuprof injection SIGSEGVs
+# the target. Override with:
+#     docker build --build-arg CUDA_VERSION=13.0.0 ...
+# See agent/collection_framework/src/plugins/cuprof/README.md for the
+# compatibility matrix and rebuild recipe.
+ARG CUDA_VERSION=12.2.0
+ARG BUILDER_UBUNTU=ubuntu20.04
+ARG RUNTIME_UBUNTU=ubuntu22.04
+
+# ---------- Stage 1: build Rust binaries ----------
+# rust:1.83-slim-bookworm — small, fast, no CUDA. libcuprof.so is built
+# separately in stage 1b (which does have CUPTI headers), then copied in.
+FROM rust:1.83-slim-bookworm AS rust-builder
+
+# Point Debian apt at Aliyun mirror — deb.debian.org is throttled from
+# mainland-China builders and can hang for 10+ min on a fresh apt-get update.
+# rust:1.83-slim-bookworm ships /etc/apt/sources.list.d/debian.sources
+# in deb822 format, so redirect via URIs= there rather than the legacy file.
+RUN sed -i 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g; s|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config libssl-dev cmake clang libclang-dev \
+    protobuf-compiler ca-certificates \
+    libelf-dev zlib1g-dev libbpf-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
+COPY agent/collection_framework /src/agent/collection_framework
+
+# CUDA_HOME unset here → build.rs skips cuprof (see build_cuprof_plugin
+# fallback). libcuprof.so comes from stage 1b instead.
+RUN cd /src/agent/collection_framework \
+    && cargo build --release --bin CollectionFramework \
+    && cargo build --release --manifest-path client/Cargo.toml
+
+# ---------- Stage 1b: build libcuprof.so with CUPTI headers ----------
+# devel tag ships CUPTI headers (needed by src/plugins/cuprof/Makefile).
+#
+# ubuntu20.04, NOT 22.04: libcuprof.so is ptrace-injected and dlopen()ed
+# *inside the target process*, so it must link against a glibc no newer than
+# whatever the target host runs. 22.04 (glibc 2.35) emits GLIBC_2.34 pthread
+# symbols, which fail to resolve on hosts with glibc <= 2.33 (e.g. Alibaba
+# Cloud Linux 3 / Anolis 8 at 2.32, CentOS 8 at 2.28). 20.04's glibc 2.31
+# keeps the floor low enough for those, and the symbols stay
+# forward-compatible on newer hosts.
+FROM nvidia/cuda:${CUDA_VERSION}-devel-${BUILDER_UBUNTU} AS cuprof-builder
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list \
+    && apt-get update && apt-get install -y --no-install-recommends \
+    build-essential ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CUDA_HOME=/usr/local/cuda
+WORKDIR /src/cuprof
+COPY agent/collection_framework/src/plugins/cuprof /src/cuprof
+# nvidia/cuda:12.2.0-devel ships CUPTI headers/libs under
+# /usr/local/cuda/targets/x86_64-linux/{include,lib}, not under
+# extras/CUPTI/{include,lib64} which the Makefile's CUPTI_HOME defaults to.
+# Point CUPTI_HOME at the actual layout and symlink lib64→lib since the
+# Makefile hardcodes a /lib64 suffix.
+RUN ln -sf lib /usr/local/cuda/targets/x86_64-linux/lib64 \
+    && make CUDA_HOME=$CUDA_HOME \
+            CUPTI_HOME=$CUDA_HOME/targets/x86_64-linux \
+            build/libcuprof.so
+
+# ---------- Stage 2: runtime ----------
+# cuda:<VERSION>-runtime carries libcuda stub + cudart, ~2GB. `runtime` is
+# the smallest CUDA tag that still exposes /usr/local/cuda/lib64.
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-${RUNTIME_UBUNTU}
+
+# python 3.11 (matches pyki's supported range 3.9–3.12) + build tools for
+# pip wheels. `libcap2-bin` gives `setcap` for capability drops if the
+# operator wants them.
+ENV DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|http://mirrors.aliyun.com/ubuntu|g' /etc/apt/sources.list \
+    && apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && ln -fs /usr/share/zoneinfo/Etc/UTC /etc/localtime \
+    && apt-get install -y --no-install-recommends \
+      software-properties-common curl ca-certificates \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+      python3.11 python3.11-dev python3.11-distutils \
+      python3-pip libelf1 libcap2-bin \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3 \
+    && python3.11 -m pip install --upgrade --no-cache-dir \
+      -i https://mirrors.aliyun.com/pypi/simple/ pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# torch is pyki's runtime prerequisite (>=2.3 per ReleaseNote). CPU-only
+# wheel keeps the image small; the target process brings its own CUDA
+# torch — pyki injects into that process, not this one.
+RUN python3.11 -m pip install --no-cache-dir \
+      -i https://mirrors.aliyun.com/pypi/simple/ \
+      "torch>=2.3,<2.5" --index-url https://download.pytorch.org/whl/cpu \
+    && python3.11 -m pip install --no-cache-dir \
+      -i https://mirrors.aliyun.com/pypi/simple/ ijson
+
+WORKDIR /opt/aiprof
+
+# CollectionFramework + client binary
+COPY --from=rust-builder /src/agent/collection_framework/target/release/CollectionFramework /opt/aiprof/
+COPY --from=rust-builder /src/agent/collection_framework/target/release/client /opt/aiprof/client
+COPY --from=rust-builder /src/agent/collection_framework/target/release/libloader.so /opt/aiprof/
+
+# Runtime .so tree — must sit next to CollectionFramework (config.yaml
+# resolves paths relative to the binary directory).
+COPY agent/collection_framework/src/plugins/pykiLoader/libloader.so                    /opt/aiprof/
+COPY agent/collection_framework/src/third_party/cupti/                                  /opt/aiprof/cupti/
+COPY --from=cuprof-builder /src/cuprof/build/libcuprof.so /opt/aiprof/
+COPY agent/collection_framework/src/plugins/pyki/pyki_dev_dir/                          /opt/aiprof/pyki_dir/
+COPY agent/collection_framework/config.yaml                                             /opt/aiprof/
+
+# Resolve vendored .so at runtime. Order: CUDA runtime → aiprof root →
+# per-plugin subdirs. Host's libcuda still wins via /usr/lib64 mount.
+ENV LD_LIBRARY_PATH=/opt/aiprof:/opt/aiprof/cupti:/usr/local/cuda/lib64:/usr/lib/x86_64-linux-gnu
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/opt/aiprof/pyki_dir \
+    RUST_LOG=info \
+    SERVER_HOST=aiprof-server:17000
+
+VOLUME ["/var/lib/aiprof"]
+
+ENTRYPOINT ["/opt/aiprof/client"]

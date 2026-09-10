@@ -1,0 +1,42 @@
+AIProf
+Copyright 2026 Alibaba Cloud
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+--------------------------------------------------------------------------------
+
+This product bundles the following third-party components. Each retains its
+own license, included alongside its source.
+
+  * pyki — Python user-space injection profiler
+    agent/collection_framework/src/plugins/pyki/ (Apache-2.0, see LICENSE there)
+    Bundles the following under third-party/:
+      - pybind11 (BSD-3-Clause), see third-party/pybind11/LICENSE
+      - libprofiler (proprietary, prebuilt binary only)
+        see agent/collection_framework/src/third_party/profiler/LIBPROFILER-EULA.txt
+        and .../profiler/NOTICE. The public header and linker script
+        remain under Apache-2.0; the static library src/libprofiler.a is
+        licensed under the accompanying EULA. pyki links through this
+        same archive via a relative path in its setup.py.
+
+  * cuprof — CUDA kernel tracer built on CUPTI
+    agent/collection_framework/src/plugins/cuprof/ (Apache-2.0, see LICENSE
+    and NOTICE there). Vendored at upstream commit 84cb9d8 with two local
+    modifications, recorded with their rationale and re-sync procedure in
+    agent/collection_framework/src/plugins/cuprof/VENDOR.md and carried as
+    patches under .../cuprof/patches/.
+
+  * NVIDIA CUPTI runtime libraries
+    agent/collection_framework/src/third_party/cupti/
+    Redistributed under the NVIDIA CUDA Toolkit End User License Agreement:
+    https://docs.nvidia.com/cuda/eula/

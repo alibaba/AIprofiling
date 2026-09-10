@@ -1,0 +1,22 @@
+{
+  "name": "local-profiling-agent",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local GPU trace profiling agent — streaming chrome-tracing parser + evidence tools + LLM synthesizer. No Aliyun OpenAPI dependency.",
+  "license": "Apache-2.0",
+  "main": "src/index.js",
+  "bin": {
+    "local-profiling-agent": "bin/cli.js"
+  },
+  "scripts": {
+    "test": "node --test test/",
+    "cli": "node bin/cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "stream-json": "^1.8.0",
+    "minimist": "^1.2.8"
+  }
+}

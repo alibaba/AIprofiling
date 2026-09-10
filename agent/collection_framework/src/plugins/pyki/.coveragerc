@@ -1,0 +1,19 @@
+[run]
+parallel = True
+patch = subprocess,_exit
+sigterm = True
+
+
+[report]
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    @(abc\\.)?abstractmethod
+
+omit =
+    src/pyki/perfdata/*
+    src/pyki/profiling/profiler.py
+    src/pyki/profiling/vllm.py
+    src/pyki/profiling/parser.py

@@ -1,0 +1,8 @@
+{
+    global:
+        PyInit_pyki_extension;
+        load_pyki;
+
+    local:
+        *;
+};

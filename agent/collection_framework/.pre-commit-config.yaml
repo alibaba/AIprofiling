@@ -1,0 +1,65 @@
+fail_fast: false
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-byte-order-marker
+      - id: check-case-conflict
+      - id: check-merge-conflict
+      - id: check-symlinks
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: trailing-whitespace
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c 'cargo fmt -- --check'
+        language: rust
+        files: \.rs$
+        args: []
+      - id: no-chinese-characters
+        name: Check for Chinese characters
+        description: "Fail if any Chinese character is found in source files"
+        entry: grep -n -P '[\x{4e00}-\x{9fff}]'
+        language: system
+        types: [text]  # 只检查文本文件
+        exclude: >
+          (?x)^(
+            .*\.lock$|
+            ^target/|
+            ^.git/|
+            ^README\.zh.*|
+            ^docs/.*\.md$  # 如果允许文档含中文，可排除
+          )$
+        pass_filenames: true
+        always_run: false
+      - id: cargo-deny
+        name: cargo deny check
+        description: Check cargo depencencies
+        entry: bash -c 'cargo deny check'
+        language: rust
+        files: \.rs$
+        args: []
+      - id: cargo-check
+        name: cargo check
+        description: Check the package for errors.
+        entry: bash -c 'cargo check --all'
+        language: rust
+        files: \.rs$
+        pass_filenames: false
+      - id: cargo-clippy
+        name: cargo clippy
+        description: Lint rust sources
+        entry: bash -c 'cargo clippy --all-targets --all-features --tests --benches -- -D warnings'
+        language: rust
+        files: \.rs$
+        pass_filenames: false
+      - id: cargo-test
+        name: cargo test
+        description: unit test for the project
+        entry: bash -c 'cargo test -- --test-threads=1'
+        language: rust
+        files: \.rs$
+        pass_filenames: false

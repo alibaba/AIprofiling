@@ -1,0 +1,5 @@
+torch
+-r tests/requirements/requirements-func.txt
+-r tests/requirements/requirements-perf.txt
+-r tests/requirements/requirements-stable.txt
+-r tests/requirements/requirements-unit.txt

@@ -1,0 +1,29 @@
+[package]
+name = "slsrs"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal Rust client for Aliyun Log Service (SLS) PutLogs REST API"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
+hmac = "0.12"
+sha1 = "0.10"
+md-5 = "0.10"
+base64 = "0.22.1"
+chrono = "0.4"
+async-trait = "0.1"
+thiserror = "1.0"
+lz4_flex = { version = "0.11", default-features = false, features = ["safe-encode", "std"] }
+bytes = "1.5"
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1.35", features = ["macros", "rt-multi-thread"] }
+
+[lib]
+crate-type = ["rlib"]
+
+[[example]]
+name = "usage"
+path = "examples/usage.rs"

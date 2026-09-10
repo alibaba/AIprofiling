@@ -1,0 +1,71 @@
+# ---- Rust build output ----
+agent/collection_framework/target/
+**/*.rs.bk
+
+# ---- Node ----
+node_modules/
+ui/webapp/dist/
+ui/frontend/dist/
+*.tsbuildinfo
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# ---- pyki build output / stale wheel backups ----
+agent/collection_framework/src/plugins/pyki/dist/
+agent/collection_framework/src/plugins/pyki/build/
+**/pyki_wheel_backup_*/
+
+# ---- PyInstaller (analysis_summary) build intermediates + output ----
+server/dashboard/build/
+server/dashboard/dist/
+server/dashboard/*.spec
+server/dashboard/analysis_summary
+
+# ---- Runtime state (server) ----
+server/dashboard/.profiling-data/
+server/dashboard/.temp-uploads/
+data/aiprof.db
+data/blobs/
+
+# ---- Secrets / local overrides (never commit) ----
+.env
+.env.*
+!.env.example
+**/llm-config.json
+docker-compose.override.yml
+docker-compose.override.yaml
+*.pem
+*.key
+id_rsa*
+credentials*
+.npmrc
+.pypirc
+.netrc
+
+# ---- Build artifacts / temp ----
+*.tmp
+*.o.tmp
+*.log
+
+# ---- Native (GPU-free) test binary ----
+test/native/test_cuprof_trace_writer
+test/native/*.dSYM/
+
+# ---- Reproducer build output ----
+reproducers/injector_probe/probe
+reproducers/*.tar.gz
+
+# ---- Editor / OS ----
+.DS_Store
+*.swp
+
+# ---- Internal planning / brainstorming notes (never commit) ----
+docs/superpowers/
+.superpowers/

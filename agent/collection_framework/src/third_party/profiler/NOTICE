@@ -1,0 +1,21 @@
+libprofiler
+Copyright (c) 2026 Alibaba Cloud. All rights reserved.
+
+libprofiler is a proprietary component of AIProf. It is distributed only
+as a prebuilt static library (`src/libprofiler.a`) together with a
+public header (`include/profiler.h`) and a linker script (`link.ld`).
+
+The header and linker script are licensed under the Apache License,
+Version 2.0 (see the top-level LICENSE file of AIProf) so that AIProf
+and other consumers may compile and link against libprofiler's public
+API. The static library itself is licensed under the terms set out in
+LIBPROFILER-EULA.txt in this directory.
+
+The `commit` file records the internal source revision from which this
+build was produced, for audit purposes only. Source is not distributed
+with AIProf.
+
+Reverse engineering, disassembly, or decompilation of the static
+library, and any redistribution of the static library separately from
+AIProf, are prohibited except to the extent permitted by applicable
+law. See LIBPROFILER-EULA.txt for the full terms.

@@ -1,0 +1,10 @@
+{
+    "name": "aiprof-bff",
+    "version": "0.1.0",
+    "private": true,
+    "license": "Apache-2.0",
+    "main": "src/server.js",
+    "scripts": {
+        "start": "node src/server.js"
+    }
+}

@@ -1,0 +1,13 @@
+{
+  "traceEvents": [
+    {"ph":"M","name":"process_name","pid":0,"tid":0,"args":{"name":"python"}},
+    {"ph":"X","cat":"cpu_op","name":"aten::conv2d","pid":0,"tid":1,"ts":100,"dur":50,"args":{"external_id":1}},
+    {"ph":"X","cat":"cuda_runtime","name":"cudaLaunchKernel","pid":0,"tid":1,"ts":110,"dur":8,"args":{"correlation":42}},
+    {"ph":"X","cat":"kernel","name":"sm80_xmma_gemm_f16","pid":0,"tid":7,"ts":130,"dur":200,"args":{"correlation":42,"device":0,"stream":7}},
+    {"ph":"X","cat":"kernel","name":"sm80_xmma_gemm_f16","pid":0,"tid":7,"ts":400,"dur":210,"args":{"device":0,"stream":7}},
+    {"ph":"X","cat":"kernel","name":"elementwise_kernel","pid":0,"tid":7,"ts":650,"dur":40,"args":{"device":0,"stream":7}},
+    {"ph":"X","cat":"gpu_memcpy","name":"Memcpy HtoD","pid":0,"tid":7,"ts":90,"dur":15,"args":{"device":0,"bytes":4096}},
+    {"ph":"X","cat":"kernel","name":"sm80_xmma_gemm_f16","pid":0,"tid":7,"ts":1200,"dur":205,"args":{"device":0,"stream":7}}
+  ],
+  "deviceProperties": [{"name":"NVIDIA A10","id":0}]
+}

@@ -1,0 +1,89 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# AIProf 两镜像最小栈：
+#
+#   aiprof-server  : dashboardServer.js + analysis_summary + webapp dist（:17000）
+#   aiprof-client  : CollectionFramework + WS client（连 server 拉任务）
+#
+# 起法：
+#   cd <repo root>
+#   docker compose -f deploy/docker/docker-compose.yml up -d --build
+#
+# 触发一次采集（示例：采集 pid 12345 十秒）：
+#   curl -X POST http://127.0.0.1:17000/api/v1/app_observ/aiAnalysis/start_ai_analysis \
+#     -H 'Content-Type: application/json' \
+#     -d '{"instance":"aiprof-client-local",
+#          "pids":"12345","timeout":10000}'
+#
+# 报告 URL（analysisId 从上一步返回体拿）：
+#   http://127.0.0.1:17000/api/v1/app_observ/aiAnalysis/report?analysisId=<UUID>
+#
+# ─── A100 / H100 主机注意 ──────────────────────────────────────────────
+#   client 需要 --pid=host + CAP_SYS_PTRACE + --gpus all。以下 compose 已经
+#   把这些配好，宿主只要装了 nvidia-container-toolkit 就能起。
+#   若目标进程本身跑在容器里，把它的 PID namespace 共享给 aiprof-client：
+#     `pid: container:<target-container>` 替代下面的 `pid: host`。
+
+services:
+  aiprof-server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.server
+      args:
+        # Pre-fill the instance selector on the capture page.
+        # Must match the client's CLIENT_ID below.
+        VITE_DEFAULT_INSTANCE: aiprof-client-local
+    image: aiprof/server:latest
+    container_name: aiprof-server
+    restart: unless-stopped
+    ports:
+      - "17000:17000"
+    volumes:
+      - aiprof-data:/var/lib/aiprof
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:17000/api/clients"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  aiprof-client:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.client
+    image: aiprof/client:latest
+    container_name: aiprof-client
+    depends_on:
+      aiprof-server:
+        condition: service_healthy
+    # 走宿主网络 → client 用 http://127.0.0.1:17000 直接找 server；也让 dashrs
+    # 上传的 multipart 大文件不必再走 compose 网桥转发。
+    network_mode: host
+    # 让 pyki 能 ptrace 宿主进程；ipc=host 是 CUDA runtime 共享 shm 段所需。
+    pid: host
+    ipc: host
+    cap_add:
+      - SYS_PTRACE     # pyki 注入 CPython
+      - SYS_ADMIN      # perf_event_open
+    security_opt:
+      - seccomp:unconfined   # ptrace 需要
+      - apparmor:unconfined
+    volumes:
+      - aiprof-data:/var/lib/aiprof
+    environment:
+      SERVER_HOST: 127.0.0.1:17000
+      CLIENT_ID: aiprof-client-local
+      RUST_LOG: info
+    # ── GPU 访问 ── 需要 nvidia-container-toolkit。
+    # docker compose 2.x：把下面这块打开；1.x 用户改成顶层 `runtime: nvidia`。
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility, compute]
+
+volumes:
+  aiprof-data:
+    driver: local

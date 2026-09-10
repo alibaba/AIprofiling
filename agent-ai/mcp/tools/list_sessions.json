@@ -1,0 +1,13 @@
+{
+    "name": "list_sessions",
+    "description": "List AIProf profiling sessions. Optional filters narrow the result.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "host": {"type": "string"},
+            "workload": {"type": "string"},
+            "kind": {"type": "string"},
+            "limit": {"type": "integer", "default": 50}
+        }
+    }
+}

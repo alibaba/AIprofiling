@@ -1,0 +1,26 @@
+[package]
+name = "ossrs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+reqwest = { version = "0.11", default-features = false, features = ["multipart", "stream", "rustls-tls"] }
+hmac = "0.12"
+sha1 = "0.10"
+base64 = "0.22.1"
+chrono = "0.4"
+async-trait = "0.1"
+thiserror = "1.0"
+flate2 = "1.0"
+quick-xml = { version = "0.39.0", features = ["serialize"] }
+serde = { version = "1.0", features = ["derive"] }
+serde-xml-rs = "0.8.2"
+anyhow = "1.0"
+futures = "0.3"
+bytes = "1.5"
+url = "2.5"
+tracing = { workspace = true}
+
+[lib]
+crate-type = ["rlib"]

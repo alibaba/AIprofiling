@@ -1,0 +1,68 @@
+# v0.2.5
+1. 去掉注入环境判断
+2. 精简日志
+
+# v0.2.11
+1. 支持自适应pid：开启adapt，且不输入pid的情况下会自动采集使用了GPU的进程
+2. 支持snapshot
+3. 支持原地上传
+4. 支持merge
+
+# v0.2.13
+1. 修复部分bug(nvtx.json序列化错误等)
+
+# v0.2.14
+1. 适配cupti插件
+2. 支持C++进程采集
+3. 支持低版本torch进程采集
+
+已知问题：
+1. cupti注入偶发失败：Failed to call InitializeInjection()
+2. pyki与cupti同时采集，无法正常结束进程，现象是cupti插件没有发送writeover信号
+
+# v0.2.15
+1. 解决：cupti注入偶发失败：Failed to call InitializeInjection()
+2. 解决：pyki与cupti同时采集，无法正常结束进程，现象是cupti插件没有发送writeover信号
+3. 解决cupti插件在容器场景不支持的问题
+4. 解决cupti插件失败等问题，支持环境为nvidia+cuda12.4+driver550
+5. 如果用户开启了with_modules/record_shapes/flops/profile_memory但没有开启Torch，则自动开启Torch，并给出警告提示
+6. iteration_function与iteration_module改为非必需参数，默认值为""
+7. snapshot采集默认关闭
+8. 升级pyki插件
+9. fix sglang iteration模式采集夯住的问题
+10. fix amd机器没有aggregationkernel bug
+
+# v0.3.1
+1. 支持mem_timeline指标, 默认关闭
+2. 优化torch文件的后处理逻辑, 优化内存占用与处理速度
+3. debug模式添加内存监控
+4. pyki插件更新
+5. 修改CUPTI插件支持版本为: 12.0~12.8
+6. snapshot采集默认关闭
+7. 添加tcp net指标, 默认关闭
+8. 支持采集框架直接上传oss
+9. 解决ppu环境判断问题
+10. 修复低版本torch后处理失败问题
+11. 修复部分环境pyki安装失败问题
+
+# v0.4.1 (CollectionFramework 0.4.1)
+1. 升级 pyki 插件
+2. 增加 nccl profiling采集插件
+3. 解决snapshot采集时, python进程占有了gil锁导致死锁问题
+4. 解决cupti插件注入偶发失败的问题
+5. 支持dashboard client
+6. 重构环境判断模块
+7. 修复AMD场景 process name 显示为unknown的bug
+
+已知问题：
+1. tensorRT场景开启profile_memory可能会导致torch启动超时，导致采集不到Torch和GPU Kernel数据
+2. 部分场景下会将训练场景误识别为vllm场景导致iteration模式采集失败
+
+# v0.4.2 (CollectionFramework 0.4.2)
+1. 修复python uv虚拟环境中python可执行文件路径获取错误的问题
+2. cupti插件优化
+3. 取消libssl1.1的依赖(但目前还是依赖libelf.so.1、libz.so.1、libzstd.so.1、liblzma.so.5、libbz2.so.1)
+
+# v0.4.4 (CollectionFramework 0.4.4)
+1. 升级 ROCm 插件, 解决 AMD 308X 卡采集失败的问题
+2. snapshot依赖升级从torch>=2.1.0至torch>=2.3.0

@@ -1,0 +1,57 @@
+From 4f537011f978c9b879d16923cda697cb67e3033a Mon Sep 17 00:00:00 2001
+From: v <v@l>
+Date: Tue, 8 Sep 2026 15:50:40 +0800
+Subject: [PATCH 1/2] aiprof: put $ORIGIN first in libcuprof.so RPATH for
+ ptrace injection
+
+CollectionFramework ptrace-injects libcuprof.so into an already-running
+target process, so the dlopen and its library resolution happen in the
+*target's* address space with the target's search paths. The build-time
+CUPTI_HOME rpath may not exist there (different CUDA major version, or a
+containerised build against a bare-metal target). $ORIGIN resolves to the
+directory the injected copy was staged into (/tmp inside the target's mount
+namespace), where CollectionFramework places a matching vendored
+libcupti.so.<major>. The absolute CUPTI_HOME entry stays as a fallback for
+the plain CUDA_INJECTION64_PATH launch flow on the build host.
+---
+ Makefile | 16 +++++++++++++---
+ 1 file changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/Makefile b/Makefile
+index 3f24807..5953ea5 100644
+--- a/Makefile
++++ b/Makefile
+@@ -1,3 +1,5 @@
++# AIProf-local modification (Apache-2.0 4(b)): this file differs from
++# upstream cuprof. See VENDOR.md and patches/0001-rpath-origin-for-ptrace-injection.patch.
+ # cuprof - minimal CUPTI kernel timeline profiler
+ #
+ # Build artifacts:
+@@ -23,8 +25,15 @@ LIB_OBJS := $(LIB_SRCS:src/%.cc=$(BUILD)/%.o)
+ # never clash with symbols in the target process.
+ #
+ # RPATH matters: the CUDA driver dlopen()s this library, and a failed dlopen is
+-# completely silent — no error, no collection. Baking in the CUPTI path avoids
+-# depending on the target process having LD_LIBRARY_PATH set.
++# completely silent — no error, no collection.
++#
++# $ORIGIN comes first so an injected copy resolves libcupti.so.12 from its own
++# directory: the injector ptrace-dlopen()s this library inside the *target*
++# process, where the build-time CUPTI path may not exist (different CUDA
++# version, or a containerised build vs. bare-metal target). The absolute
++# CUPTI_HOME path stays as a fallback for the normal
++# CUDA_INJECTION64_PATH flow on the build host.
++#
+ # -z nodelete: CUPTI keeps holding pointers into this library's code for the
+ # life of the process (activity buffer callbacks; there is no per-callback
+ # unregister API), so unloading it is never safe. Some orchestrators still
+@@ -34,7 +43,8 @@ LIB_OBJS := $(LIB_SRCS:src/%.cc=$(BUILD)/%.o)
+ # truncated or overwritten backing file, which the contract in
+ # docs/embedding.md forbids instead.
+ LDFLAGS_LIB := -shared -Wl,--version-script=export.map -Wl,--no-undefined \
+-               -Wl,-rpath,$(CUPTI_HOME)/lib64 -Wl,-z,nodelete
++               -Wl,-rpath,'$$ORIGIN' -Wl,-rpath,$(CUPTI_HOME)/lib64 \
++               -Wl,-z,nodelete
+ LDLIBS_LIB := -L$(CUPTI_HOME)/lib64 -lcupti -lpthread
+ 
+ .PHONY: all clean install examples

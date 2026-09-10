@@ -1,0 +1,27 @@
+[package]
+name = "dashrs"
+version = "0.1.0"
+edition = "2021"
+description = "AIProf CollectionFramework dashboard-transport exporter: tar.gz + multipart upload to the AIProf dashboard server"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "multipart", "stream"] }
+tar = "0.4"
+flate2 = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+libc = "0.2"
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { version = "1.35", features = ["macros", "rt-multi-thread"] }
+tempfile = "3"
+
+[lib]
+crate-type = ["rlib"]
+
+[[example]]
+name = "usage"
+path = "examples/usage.rs"

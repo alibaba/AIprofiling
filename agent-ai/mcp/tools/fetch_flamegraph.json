@@ -1,0 +1,11 @@
+{
+    "name": "fetch_flamegraph",
+    "description": "Fetch the Brendan-Gregg folded stacks for one AIProf session.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "session_id": {"type": "string"}
+        },
+        "required": ["session_id"]
+    }
+}

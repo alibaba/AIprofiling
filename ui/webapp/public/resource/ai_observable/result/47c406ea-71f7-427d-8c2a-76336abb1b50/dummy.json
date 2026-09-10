@@ -1,0 +1,1 @@
+{"traceEvents":[{"name":"k1","cat":"cuda_kernel","pid":1,"tid":1,"ph":"X","ts":0,"dur":10}]}

@@ -1,0 +1,5 @@
+node_modules/
+.profiling-data/
+.temp-uploads/
+analysis_summary
+*.log
