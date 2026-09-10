@@ -35,7 +35,7 @@ cargo build --release
 - `src/plugins/` — 各类插件采集器（pyki / cuprof / pykiLoader）；`pyki/` 为 vendored pyki 全量源码 + 预构建 wheel（`pyki_dev_dir/`）
 - `src/tools/` — 通用工具（writer、adapter、compress 等）
 - `src/detector/` — 运行时环境检测
-- `src/third_party/` — 第三方 vendored 依赖（cupti 头文件 / profiler 头文件）
+- `src/third_party/` — 第三方 vendored 依赖（`cupti/` 为预构建 `libcupti.so.*` 运行时库，非头文件，版权与再分发条款见该目录 `NOTICE`/`README.md`；`profiler/` 为头文件 + 预构建静态库）
 - `config.yaml` — 采集器启用/禁用与版本约束
 
 详见 `agent/AIPROF_README.md` 与仓库根 `docs/introduction.md`。
