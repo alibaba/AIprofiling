@@ -74,6 +74,13 @@ services:
       SERVER_HOST: 127.0.0.1:17000
       CLIENT_ID: aiprof-client-local
       RUST_LOG: info
+      # 同 soname 有多个 vendored libcupti 时选哪个：highest(默认) / lowest /
+      # 具体文件名如 libcupti.so.2023.2.1。CUPTI 的最低驱动要求随补丁级别上升，
+      # 老驱动宿主上的症状是采集报成功、但 kernel 时间线是空的（CF 写死
+      # verbose: false，cuprof 的 Logf 没开 CUPROF_VERBOSE 就直接返回，所以
+      # CUPTI 的错误码不会打印出来）；这时改成 lowest。
+      # 详见 agent/collection_framework/src/third_party/cupti/README.md。
+      # AIPROF_CUPTI_PREFER: lowest
     # ── GPU 访问 ── 需要 nvidia-container-toolkit。
     # docker compose 2.x：把下面这块打开；1.x 用户改成顶层 `runtime: nvidia`。
     deploy:
