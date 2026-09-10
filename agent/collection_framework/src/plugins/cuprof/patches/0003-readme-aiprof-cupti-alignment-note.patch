@@ -1,0 +1,58 @@
+From 01cd51000b639cdc3ec91bbdd785bce9be0fa680 Mon Sep 17 00:00:00 2001
+From: AlanFokCo <alanfok2868@gmail.com>
+Date: Thu, 10 Sep 2026 14:45:00 +0800
+Subject: [PATCH 3/3] aiprof: point the README at the vendored CUPTI alignment
+ contract
+
+Upstream cuprof links against the system CUPTI and deliberately vendors no
+CUDA libraries, so its README says nothing about which CUPTI a build ends up
+needing. Inside AIProf the compiled libcuprof.so is ptrace-injected into
+arbitrary target processes, where the CUPTI ABI is tied to the build
+machine's CUDA major and a mismatch with the target host's driver silently
+SIGSEGVs the injected process.
+
+Add a short note at the top of the README that sends a builder to AIProf's
+vendored-CUPTI directory, which documents the alignment contract and how to
+rebuild for a different CUDA major. Without it the constraint is discoverable
+only from VENDOR.md, which a reader of the vendored README has no reason to
+open.
+---
+ README.md | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/README.md b/README.md
+index 6ae374f..71fda19 100644
+--- a/README.md
++++ b/README.md
+@@ -1,3 +1,6 @@
++<!-- AIProf-local modification (Apache-2.0 4(b)): this file differs from
++     upstream cuprof. See VENDOR.md and
++     patches/0003-readme-aiprof-cupti-alignment-note.patch. -->
+ # cuprof
+ 
+ A minimal CUDA kernel timeline profiler built on
+@@ -5,6 +8,21 @@ A minimal CUDA kernel timeline profiler built on
+ get a Chrome-trace JSON you can open in `chrome://tracing` or
+ [Perfetto](https://ui.perfetto.dev).
+ 
++> **Building cuprof for use inside AIProf's CollectionFramework?** Read
++> `../../third_party/cupti/README.md` first. AIProf ptrace-injects the
++> compiled `libcuprof.so` into arbitrary target processes; the CUPTI ABI
++> is tied to the build machine's CUDA major, and a mismatch with the
++> target host's CUDA driver silently SIGSEGVs the injected process. The
++> vendored CUPTI directory documents the alignment contract and how to
++> rebuild for a different CUDA major.
++>
++> Note that the "no CUDA libraries are vendored" statement under **Build**
++> below, and the equivalent one in `NOTICE`, describe upstream cuprof as a
++> standalone repository. This copy ships inside AIProf, which *does* vendor
++> `libcupti.so.*` runtimes one level up in `../../third_party/cupti/`, so
++> that injection also works on targets with no CUPTI of their own; see that
++> directory's `NOTICE` for their licence terms.
++
+ ```bash
+ cuprof run -o trace.json python train.py
+ ```
+-- 
+2.55.0
+

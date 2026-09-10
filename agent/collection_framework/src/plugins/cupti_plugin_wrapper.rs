@@ -983,4 +983,35 @@ mod tests {
         // Two calls with different uniques must not collide.
         assert_ne!(name, cupti_staging_name(4242, 0xdeadbef0));
     }
+
+    #[test]
+    fn vendored_cuprof_still_puts_origin_first_in_its_rpath() {
+        // The entire staging design rests on patch 0001: $ORIGIN has to come
+        // first in libcuprof.so's RPATH for a libcupti dropped next to the
+        // injected copy to be found at all. No other test would notice a re-sync
+        // of the vendored tree that dropped it.
+        let makefile = include_str!("cuprof/Makefile");
+        assert!(
+            makefile.contains("-Wl,-rpath,'$$ORIGIN'"),
+            "vendored cuprof no longer puts $ORIGIN first in the RPATH: \
+             patches/0001-rpath-origin-for-ptrace-injection.patch was lost in a re-sync"
+        );
+    }
+
+    #[test]
+    fn vendored_cuprof_readme_still_points_at_the_cupti_contract() {
+        // Patch 0003 exists because this note was in the tree with nothing
+        // accounting for it. A re-sync that drops it should fail here rather
+        // than silently reintroduce that drift.
+        let readme = include_str!("cuprof/README.md");
+        assert!(
+            readme.contains("../../third_party/cupti/README.md"),
+            "vendored cuprof README lost the AIProf CUPTI-alignment note: \
+             patches/0003-readme-aiprof-cupti-alignment-note.patch was dropped in a re-sync"
+        );
+        assert!(
+            readme.contains("AIProf-local modification (Apache-2.0 4(b))"),
+            "vendored cuprof README lost its Apache-2.0 4(b) notice"
+        );
+    }
 }
