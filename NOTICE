@@ -38,5 +38,11 @@ own license, included alongside its source.
 
   * NVIDIA CUPTI runtime libraries
     agent/collection_framework/src/third_party/cupti/
-    Redistributed under the NVIDIA CUDA Toolkit End User License Agreement:
-    https://docs.nvidia.com/cuda/eula/
+    Ten prebuilt libcupti.so.* binaries, redistributed unmodified under the
+    NVIDIA CUDA Toolkit End User License Agreement:
+    https://docs.nvidia.com/cuda/eula/ (Attachment A of that EULA lists
+    libcupti.so among the redistributable CUDA Toolkit files). They are not
+    covered by the Apache-2.0 licence above. The retained NVIDIA copyright
+    notice, the section-level redistribution basis, and the per-file CUPTI
+    release / ELF SONAME table live in the NOTICE and README.md files inside
+    that directory.

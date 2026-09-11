@@ -21,7 +21,7 @@ pub struct UnixSocketHandler;
 ///   * the pyki loader emits `STARTPYKICOLLECTOR` / `STOPPYKICOLLECTOR` from the
 ///     Python snippet built in `main.rs`.
 ///
-/// The `*_drift_guard` tests at the bottom of this file fail if a re-sync of the
+/// The `drift_guard_*` tests at the bottom of this file fail if a re-sync of the
 /// vendored cuprof tree renames any of them, which is the check
 /// `src/plugins/cuprof/VENDOR.md` otherwise asks a human to perform by hand.
 pub fn scheduler_event_for(received: &str, pid: i32) -> Option<SchedulerEvent> {

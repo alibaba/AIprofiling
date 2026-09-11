@@ -1,7 +1,7 @@
-From 1909f620fe6a80a2324f55c87a9a015859bb2bed Mon Sep 17 00:00:00 2001
-From: v <v@l>
+From b5a4a7a9f1b60381be9647265a4690fa96955d11 Mon Sep 17 00:00:00 2001
+From: AlanFokCo <alanfok2868@gmail.com>
 Date: Tue, 8 Sep 2026 15:51:02 +0800
-Subject: [PATCH 2/2] aiprof: emit kernel timestamps in CLOCK_MONOTONIC to fuse
+Subject: [PATCH 2/4] aiprof: emit kernel timestamps in CLOCK_MONOTONIC to fuse
  with pyki
 
 CUPTI reports activity timestamps as CLOCK_REALTIME (epoch) nanoseconds,
@@ -11,8 +11,8 @@ both sources on one Perfetto timeline, so an unadjusted CUPTI trace lands
 
 Compute (CLOCK_REALTIME - CLOCK_MONOTONIC) once in LoadConfig() and subtract
 it per event in WriteChromeTrace(). A timestamp at or below the offset is
-left unchanged rather than subtracted, so a
-pre-offset timestamp can never wrap uint64.
+left unchanged rather than subtracted, so a pre-offset timestamp can never
+wrap uint64.
 
 This deliberately implements 'framework/Python stack fusion', which upstream
 cuprof lists as a non-goal in docs/design.md; keep it local unless upstream
@@ -162,3 +162,6 @@ index 71094fd..d61aecc 100644
  
  }  // namespace cuprof
  
+-- 
+2.55.0
+

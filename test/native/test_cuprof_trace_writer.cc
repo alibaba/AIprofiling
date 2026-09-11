@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// Native regression test for AIProf's local cuprof patch 0002
-// (patches/0002-align-cupti-epoch-to-clock-monotonic.patch), which converts
-// CUPTI's CLOCK_REALTIME nanosecond timestamps to CLOCK_MONOTONIC so kernel
-// events share a Perfetto timeline with pyki / torch.profiler.
+// Native regression test for AIProf's local cuprof patches 0002 and 0004
+// (patches/0002-align-cupti-epoch-to-clock-monotonic.patch and
+// patches/0004-duration-from-raw-endpoint-pair.patch), which convert CUPTI's
+// CLOCK_REALTIME nanosecond timestamps to CLOCK_MONOTONIC so kernel events
+// share a Perfetto timeline with pyki / torch.profiler, and derive each
+// event's duration from the raw endpoint pair so it cannot underflow.
 //
 // trace_writer.cc has no CUDA/CUPTI dependency, so this builds and runs on any
 // Linux box with a C++11 compiler — no GPU, no CUDA toolkit, no container:
@@ -111,12 +113,13 @@ void TestOffsetApplied() {
     std::remove(path.c_str());
 }
 
-void TestSaturationNeverWraps() {
-    std::cout << "TestSaturationNeverWraps: timestamps below the offset clamp to themselves\n";
+void TestPreOffsetLeftUnchanged() {
+    std::cout << "TestPreOffsetLeftUnchanged: a timestamp at or below the offset is left as-is\n";
     const std::string path = "/tmp/aiprof_cuprof_tw_wrap.json";
     std::vector<cuprof::Event> events;
-    // start_ns < offset: naive subtraction would wrap uint64 to ~1.8e19 ns and
-    // produce an absurd ts. The patch guards with a ternary instead.
+    // Both endpoints below the offset: naive subtraction would wrap uint64 to
+    // ~1.8e19 ns and produce an absurd ts. The patch guards with a ternary
+    // that leaves such a value unchanged (it does not clamp it to 0).
     events.push_back(MakeEvent("early_kernel", 500, 900, 1));
 
     Check(cuprof::WriteChromeTrace(path, events, kOffsetNs), "WriteChromeTrace returns true");
@@ -144,6 +147,64 @@ void TestZeroOffsetIsUpstreamBehaviour() {
     std::remove(path.c_str());
 }
 
+// Patch 0004. Both endpoints used to be shifted separately and the duration was
+// their difference, which is only sound while they land on the same side of the
+// offset. The offset is computed once in LoadConfig() and is roughly the
+// wall-clock time at boot, so putting a later event's start below it takes a
+// CLOCK_REALTIME step backwards by more than the uptime - a VM resumed from a
+// snapshot with a stale RTC, an explicit `date -s`, or a large `chronyc
+// makestep` on a host that booted with a badly wrong clock. Ordinary NTP
+// slewing cannot do it. The trigger is narrow; the point of the fix is that
+// WriteChromeTrace() is exported and should not depend on its caller keeping
+// both endpoints on one side of a shift the caller never sees.
+// A kernel duration can never legitimately approach 1e9 us (1000 s), so that
+// bound is what separates a correct answer from a uint64 underflow.
+void TestStraddlingEventDurationDoesNotUnderflow() {
+    std::cout << "TestStraddlingEventDurationDoesNotUnderflow: start below the offset, end above it\n";
+    const std::string path = "/tmp/aiprof_cuprof_tw_straddle.json";
+    std::vector<cuprof::Event> events;
+    // start_ns is 1 us below the offset, end_ns is 5 us above it. Shifting each
+    // endpoint separately leaves adj_start at epoch scale and adj_end at 5000,
+    // so adj_end - adj_start used to underflow to ~1.7e19 ns (~1.7e16 us).
+    events.push_back(MakeEvent("straddling_kernel", kOffsetNs - 1000, kOffsetNs + 5000, 4));
+
+    Check(cuprof::WriteChromeTrace(path, events, kOffsetNs), "WriteChromeTrace returns true");
+    const std::string json = ReadFile(path);
+    double ts = -1, dur = -1;
+    Check(NthDouble(json, "ts", 0, &ts) && NthDouble(json, "dur", 0, &dur), "event has ts/dur");
+    Check(dur == 6.0, "dur spans both endpoints: 6000 ns == 6.000 us (got " + std::to_string(dur) + ")");
+    Check(dur < 1e9, "dur did not underflow uint64 (got " + std::to_string(dur) + ")");
+    // The start timestamp keeps patch 0002's semantics: below the offset, so
+    // left unchanged rather than wrapped.
+    Check(ts == static_cast<double>((kOffsetNs - 1000) / 1000),
+          "pre-offset ts left unchanged (got " + std::to_string(ts) + ")");
+    std::remove(path.c_str());
+}
+
+void TestUnsetEndNsDoesNotUnderflow() {
+    std::cout << "TestUnsetEndNsDoesNotUnderflow: an event whose end_ns is still 0\n";
+    const std::string path = "/tmp/aiprof_cuprof_tw_noend.json";
+    std::vector<cuprof::Event> events;
+    // cuprof's own IngestRecord (src/cupti_sink.cc) drops records with
+    // end == 0 || end < start, so this shape cannot reach the writer through
+    // cuprof's path. It is covered because WriteChromeTrace() is exported in
+    // trace_writer.h and cannot assume an embedder filtered its records first.
+    // end_ns == 0 is below the offset, so it used to stay 0 while adj_start
+    // became a large monotonic value, and 0 - adj_start underflowed to ~1.8e19 ns.
+    events.push_back(MakeEvent("in_flight_kernel", kEpochNs + 1000000, 0, 9));
+
+    Check(cuprof::WriteChromeTrace(path, events, kOffsetNs), "WriteChromeTrace returns true");
+    const std::string json = ReadFile(path);
+    double ts = -1, dur = -1;
+    Check(NthDouble(json, "ts", 0, &ts) && NthDouble(json, "dur", 0, &dur), "event has ts/dur");
+    Check(dur == 0.0, "unset end_ns clamps dur to 0.000 us (got " + std::to_string(dur) + ")");
+    Check(dur < 1e9, "dur did not underflow uint64 (got " + std::to_string(dur) + ")");
+    const double kUptimeUs = 345600.0 * 1e6;
+    Check(ts == kUptimeUs + 1000.0,
+          "ts still shifts normally when start_ns is above the offset (got " + std::to_string(ts) + ")");
+    std::remove(path.c_str());
+}
+
 void TestStreamLanesAndStructure() {
     std::cout << "TestStreamLanesAndStructure: one metadata lane per stream, JSON well formed\n";
     const std::string path = "/tmp/aiprof_cuprof_tw_lanes.json";
@@ -168,7 +229,9 @@ void TestStreamLanesAndStructure() {
 
 int main() {
     TestOffsetApplied();
-    TestSaturationNeverWraps();
+    TestPreOffsetLeftUnchanged();
+    TestStraddlingEventDurationDoesNotUnderflow();
+    TestUnsetEndNsDoesNotUnderflow();
     TestZeroOffsetIsUpstreamBehaviour();
     TestStreamLanesAndStructure();
     std::cout << (g_failures == 0 ? "\nALL PASS\n" : "\nFAILURES: ")

@@ -1,3 +1,6 @@
+<!-- AIProf-local modification (Apache-2.0 4(b)): this file differs from
+     upstream cuprof. See VENDOR.md and
+     patches/0003-readme-aiprof-cupti-alignment-note.patch. -->
 # cuprof
 
 A minimal CUDA kernel timeline profiler built on
@@ -12,6 +15,13 @@ get a Chrome-trace JSON you can open in `chrome://tracing` or
 > target host's CUDA driver silently SIGSEGVs the injected process. The
 > vendored CUPTI directory documents the alignment contract and how to
 > rebuild for a different CUDA major.
+>
+> Note that the "no CUDA libraries are vendored" statement under **Build**
+> below, and the equivalent one in `NOTICE`, describe upstream cuprof as a
+> standalone repository. This copy ships inside AIProf, which *does* vendor
+> `libcupti.so.*` runtimes one level up in `../../third_party/cupti/`, so
+> that injection also works on targets with no CUPTI of their own; see that
+> directory's `NOTICE` for their licence terms.
 
 ```bash
 cuprof run -o trace.json python train.py

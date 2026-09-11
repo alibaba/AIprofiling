@@ -1,0 +1,62 @@
+NVIDIA CUPTI runtime libraries (libcupti.so.*) - retained license notice
+========================================================================
+
+The ten binaries in this directory are the CUDA Profiling Tools Interface
+(CUPTI) runtime library for Linux, a component of the NVIDIA CUDA Toolkit.
+They are redistributed unmodified, in binary form, as part of the
+aiprof/client application image - not as a stand-alone product.
+
+    Copyright NVIDIA Corporation. All rights reserved.
+
+These binaries are NOT covered by the Apache License, Version 2.0 that
+applies to the rest of AIProf. They are licensed under the NVIDIA CUDA
+Toolkit End User License Agreement (EULA),
+https://docs.nvidia.com/cuda/eula/ (revision v13.4, last updated
+2026-01-26; every section number below refers to that revision). That
+revision was consulted at the URL above on 2026-09-10. AIProf does not
+redistribute the EULA text itself - only this notice.
+
+The redistribution basis is the EULA's distribution grant. §2.2 states
+that the distributable CUDA Toolkit files are the ones listed in
+Attachment A, and Attachment A (§2.6) lists the "CUDA Profiling Tools
+Interface (CUPTI) Library ... Linux libcupti.so". Attachment A's preamble
+extends that list to "certain variations of these files that have version
+number or architecture specific information embedded in the file name",
+which is why the version-numbered file names below are covered. §2.3
+permits copying and redistributing object code designed exclusively for
+Linux or FreeBSD, provided the object code files are not modified in any
+way (except for unzipping of compressed files); nothing in this directory
+is patched, stripped or relinked. §1.1.2 sets out the conditions that
+apply to any application shipping those files, and AIProf meets them by
+keeping the copyright notice above, shipping the binaries unmodified, and
+not using NVIDIA's name to promote this product.
+
+NVIDIA provides these binaries "AS IS" and "WITH ALL FAULTS"; §1.4
+disclaims all warranties, including merchantability, fitness for a
+particular purpose and non-infringement. NVIDIA, CUDA and CUPTI are
+trademarks of NVIDIA Corporation; AIProf is not sponsored or endorsed by
+NVIDIA (§1.2). This file records AIProf's licence position; it is not
+legal advice.
+
+Binaries as shipped (file name = CUPTI release as published by NVIDIA;
+SONAME read from each ELF header; CUDA generation = the Toolkit line the
+file came from):
+
+    file                  CUPTI release  ELF SONAME        CUDA generation
+    libcupti.so.9.0.176   9.0.176        libcupti.so.9.0   CUDA 9.0
+    libcupti.so.10.2.75   10.2.75        libcupti.so.10.2  CUDA 10.2
+    libcupti.so.2020.1.0  2020.1.0       libcupti.so.11.0  CUDA 11.0
+    libcupti.so.2021.2.2  2021.2.2       libcupti.so.11.4  CUDA 11.4
+    libcupti.so.2022.2.0  2022.2.0       libcupti.so.11.7  CUDA 11.7
+    libcupti.so.2023.2.1  2023.2.1       libcupti.so.12    CUDA 12.1
+    libcupti.so.2024.1.1  2024.1.1       libcupti.so.12    CUDA 12.3
+    libcupti.so.2024.3.2  2024.3.2       libcupti.so.12    CUDA 12.5
+    libcupti.so.2025.2.1  2025.2.1       libcupti.so.12    CUDA 12.8
+    libcupti.so.2025.3.1  2025.3.1       libcupti.so.13    CUDA 13.0
+
+Ten files, 67,449,464 bytes in total (~67 MB, ~64 MiB). Four CUPTI
+releases share the SONAME libcupti.so.12, so the SONAME alone does not
+identify the Toolkit release a file came from. See README.md in this
+directory for byte sizes and SHA-256 sums, for why the binaries are
+bundled, for how one is selected at runtime, and for how to update or
+prune the set.

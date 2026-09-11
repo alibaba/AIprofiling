@@ -25,6 +25,7 @@ RESTART="${RESTART:-unless-stopped}"           # docker restart policy
 PRIVILEGED="${PRIVILEGED:-0}"                  # 1=用 --privileged（内核<5.8 退化路径）
 BUILD="${BUILD:-0}"                            # 1=先 build 镜像
 TRANSPORT="${TRANSPORT:-}"                     # 控制平面传输：空=ws(默认) / poll(反代剥 Upgrade 头时用)
+CUPTI_PREFER="${CUPTI_PREFER:-}"               # 同 soname 有多个 vendored libcupti 时选哪个：空=最高版本(默认) / lowest / 具体文件名
 
 usage() {
   cat <<EOF
@@ -37,6 +38,7 @@ usage() {
   --target <container>    目标进程所在容器名(pid共享)  (默认 空=pid host)
   --restart <policy>      重启策略                    (默认 $RESTART)
   --transport <ws|poll>   控制平面传输，反代剥 WS Upgrade 头时用 poll (默认 ws)
+  --cupti-prefer <spec>   vendored libcupti 选择：highest(默认) / lowest / libcupti.so.<ver>
   --privileged            用 --privileged（内核<5.8）
   --build                 起容器前先 build 镜像
   -h, --help              显示本帮助
@@ -54,6 +56,7 @@ while [ $# -gt 0 ]; do
     --target)     TARGET_CONTAINER="$2"; shift 2;;
     --restart)    RESTART="$2"; shift 2;;
     --transport)  TRANSPORT="$2"; shift 2;;
+    --cupti-prefer) CUPTI_PREFER="$2"; shift 2;;
     --privileged) PRIVILEGED=1; shift;;
     --build)      BUILD=1; shift;;
     -h|--help)    usage; exit 0;;
@@ -96,7 +99,15 @@ if [ -n "$TRANSPORT" ]; then
   TRANSPORT_ARG=(-e TRANSPORT="$TRANSPORT")
 fi
 
-echo "==> run $NAME  (SERVER_HOST=$SERVER_HOST  CLIENT_ID=$CLIENT_ID  gpus=$GPUS  transport=${TRANSPORT:-ws})"
+# Same reasoning for AIPROF_CUPTI_PREFER: forward it only when the operator set
+# it, so the container inherits the client's own default (highest release)
+# rather than an explicit empty value.
+CUPTI_PREFER_ARG=()
+if [ -n "$CUPTI_PREFER" ]; then
+  CUPTI_PREFER_ARG=(-e AIPROF_CUPTI_PREFER="$CUPTI_PREFER")
+fi
+
+echo "==> run $NAME  (SERVER_HOST=$SERVER_HOST  CLIENT_ID=$CLIENT_ID  gpus=$GPUS  transport=${TRANSPORT:-ws}  cupti=${CUPTI_PREFER:-highest})"
 docker run -d --name "$NAME" --restart "$RESTART" \
   "${PID_ARG[@]}" --ipc host \
   --gpus "$GPUS" \
@@ -104,6 +115,7 @@ docker run -d --name "$NAME" --restart "$RESTART" \
   -e SERVER_HOST="$SERVER_HOST" \
   -e CLIENT_ID="$CLIENT_ID" \
   "${TRANSPORT_ARG[@]}" \
+  "${CUPTI_PREFER_ARG[@]}" \
   -e RUST_LOG="${RUST_LOG:-info}" \
   "$IMAGE"
 
